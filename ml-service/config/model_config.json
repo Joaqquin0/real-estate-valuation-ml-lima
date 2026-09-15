@@ -1,0 +1,21 @@
+{
+  "modelo_version": "v2",
+  "modelo_archivo": "xgboost_venta_v2.pkl",
+  "mape_test": 15.04,
+  "r2_test": 0.7469,
+  "mae_test": 52165.93,
+  "rmse_test": 78170.00,
+  "train_periodo": "2016-2023",
+  "test_periodo": "2024-2025",
+  "ipc_actual": {
+    "valor": 169.18,
+    "periodo": "2026-Q1",
+    "fuente": "INEI/BCRP — serie PN01270PM, Base Dic 2009 = 100",
+    "nota": "Actualizar este valor al cierre de cada trimestre sin necesidad de redespliegue"
+  },
+  "n_features": 33,
+  "target": "Precio_Soles_Const",
+  "log_transform": true,
+  "shap_top_n": 10,
+  "n_distritos": 22
+}

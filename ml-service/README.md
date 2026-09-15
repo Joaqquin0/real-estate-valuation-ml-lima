@@ -1,0 +1,223 @@
+# ML Service — Tasación Inmobiliaria Lima
+
+Microservicio FastAPI de predicción de precios inmobiliarios con XGBoost + explicabilidad SHAP.
+
+**Modelo**: XGBoost v2 | **MAPE**: 15.04% | **R²**: 0.7469 | **22 distritos** de Lima Metropolitana
+
+---
+
+## Requisitos
+
+- Python 3.10+
+- Los artefactos del modelo (ver sección **Configuración de artefactos**)
+
+## Instalación
+
+```bash
+cd ml-service/
+python -m venv .venv
+.venv\Scripts\activate        # Windows
+# source .venv/bin/activate   # Linux/Mac
+
+pip install -r requirements.txt
+```
+
+## Configuración de artefactos
+
+El servicio necesita los siguientes archivos (no incluidos en el repo por su tamaño):
+
+```
+ml-service/
+├── models/
+│   └── xgboost_venta_v2.pkl           ← del directorio python_modelo_tesis/models/
+├── data/
+│   ├── features_metadata.json         ← de python_modelo_tesis/data/processed/
+│   └── distrito_contexto_ref.csv      ← de python_modelo_tesis/data/processed/
+└── config/
+    └── model_config.json              ← incluido en el repo ✓
+```
+
+Copiar desde el proyecto de entrenamiento (Windows PowerShell):
+
+```powershell
+Copy-Item ..\models\xgboost_venta_v2.pkl .\models\
+Copy-Item ..\data\processed\features_metadata.json .\data\
+Copy-Item ..\data\processed\distrito_contexto_ref.csv .\data\
+```
+
+## Variables de entorno
+
+```bash
+cp .env.example .env
+# Editar .env si los artefactos están en rutas distintas
+```
+
+Parámetros clave en `.env`:
+
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `MODEL_PATH` | `models/xgboost_venta_v2.pkl` | Ruta al modelo serializado |
+| `METADATA_PATH` | `data/features_metadata.json` | Features y encoding del modelo |
+| `CONTEXT_CSV_PATH` | `data/distrito_contexto_ref.csv` | Contexto distrital (Fase 1) |
+| `DATA_PROVIDER` | `csv` | `csv` (Fase 1) o `mongo` (Fase 2) |
+| `ALLOWED_ORIGINS` | `*` | Orígenes CORS permitidos |
+
+## Arrancar el servidor
+
+```bash
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+El startup log esperado:
+```
+═══════════════════════════════════════════════════════
+  ML Service — Tasación Inmobiliaria Lima
+  Iniciando carga de artefactos ...
+═══════════════════════════════════════════════════════
+[ModelLoader] Cargando modelo: models/xgboost_venta_v2.pkl ...
+[ModelLoader] ✓ Modelo cargado (1.5 MB)
+[ModelLoader] Inicializando SHAP TreeExplainer ...
+[ModelLoader] ✓ SHAP TreeExplainer listo
+[ModelLoader] ✓ Metadata: 33 features, 22 distritos
+[ModelLoader] ✓ Config: versión=v2, IPC=169.18 (2026-Q1)
+[CSVContextProvider] Cargado: 22 distritos desde distrito_contexto_ref.csv
+[ModelLoader] ✓ Data provider: CSV
+[ModelLoader] ═══════ Servicio ML listo ═══════
+═══════════════════════════════════════════════════════
+  Servicio listo. Accede a /docs para la API.
+═══════════════════════════════════════════════════════
+```
+
+Documentación interactiva: http://localhost:8000/docs
+
+---
+
+## Endpoints
+
+### `GET /health`
+Health check para load balancers.
+```json
+{"status": "ok", "modelo": "v2", "ipc_periodo": "2026-Q1"}
+```
+
+### `GET /api/v1/distritos`
+Lista de distritos disponibles.
+```json
+{"distritos": ["Ate Vitarte", "Barranco", "..."], "total": 22}
+```
+
+### `GET /api/v1/modelo/info`
+Metadata completa del modelo activo (versión, métricas, IPC, distritos).
+
+### `POST /api/v1/prediccion/venta`
+Predice el precio de venta de un inmueble.
+
+**Request:**
+```json
+{
+  "distrito": "San Miguel",
+  "superficie": 75.0,
+  "habitaciones": 3,
+  "banios": 2,
+  "garajes": 1,
+  "piso": 5,
+  "antiguedad": 8,
+  "vista_exterior": true,
+  "anio": 2025,
+  "trimestre": 2
+}
+```
+
+**Response (200):**
+```json
+{
+  "distrito": "San Miguel",
+  "superficie_m2": 75.0,
+  "prediccion": {
+    "soles_constantes": 287000.0,
+    "soles_nominales": 485416.0,
+    "precio_m2_constantes": 3826.67,
+    "precio_m2_nominales": 6472.21
+  },
+  "intervalo_confianza": {
+    "inferior_nominales": 412000.0,
+    "superior_nominales": 558000.0,
+    "inferior_constantes": 243780.0,
+    "superior_constantes": 330220.0,
+    "mape_pct": 15.04
+  },
+  "explicabilidad": {
+    "valor_base_constantes": 432295.69,
+    "contribuciones": [
+      {
+        "feature": "Superficie",
+        "label": "Superficie (75.0 m²)",
+        "shap_value": 0.312,
+        "valor_feature": 75.0,
+        "impacto": "positivo"
+      },
+      {
+        "feature": "distrito_encoded",
+        "label": "Distrito (San Miguel)",
+        "shap_value": -0.198,
+        "valor_feature": 287982.23,
+        "impacto": "negativo"
+      }
+    ],
+    "n_features_mostradas": 10,
+    "n_features_total": 33,
+    "nota": "Los shap_values están en escala logarítmica..."
+  },
+  "modelo": {
+    "version": "v2",
+    "mape_test": 15.04,
+    "r2_test": 0.7469,
+    "ipc_factor": 169.18,
+    "periodo_ipc": "2026-Q1",
+    "train_periodo": "2016-2023",
+    "test_periodo": "2024-2025"
+  }
+}
+```
+
+**Error 422 — Distrito no disponible:**
+```json
+{
+  "error": "distrito_no_disponible",
+  "message": "El distrito 'Baños de Chosica' no está disponible en el modelo actual.",
+  "distritos_disponibles": ["Ate Vitarte", "Barranco", ...],
+  "total_distritos": 22
+}
+```
+
+---
+
+## ¿Cómo usa el frontend los valores SHAP?
+
+El campo `explicabilidad.contribuciones` está ordenado por `|shap_value|` descendente.
+Cada item tiene todo lo necesario para renderizar un gráfico de barras horizontal:
+
+- `label`: texto para el eje Y
+- `shap_value`: magnitud de la barra (escala log)
+- `impacto`: color de la barra (`positivo` → verde/rojo según convención)
+
+El `valor_base_constantes` es el precio de partida (media del modelo).
+La suma `valor_base + Σshap_values` ≈ `log1p(precio_constantes)`.
+
+---
+
+## Roadmap
+
+| Fase | Cambio | Impacto en servicio |
+|------|--------|---------------------|
+| **Fase 2** | Reemplazar `CSVContextProvider` por `MongoContextProvider` | Solo cambia `DATA_PROVIDER=mongo` en `.env` + implementar `MongoContextProvider` en `data_provider.py`. **Cero cambios** en `prediccion_service.py` |
+| **Fase 3** | Modelo de alquiler | Agregar `POST /api/v1/prediccion/alquiler` con el nuevo modelo. **Sin romper** el endpoint de venta |
+
+---
+
+## Notas metodológicas para la tesis
+
+- **Soles Constantes**: escala interna del modelo (Base dic 2009 = 100). Elimina distorsión inflacionaria.
+- **Soles Nominales**: `Precio_Const × (IPC_2026-Q1 / 100)` = valor en moneda actual.
+- **IPC 2026-Q1 = 169.18**: configurable en `config/model_config.json` sin recompilar ni redesplegar.
+- **SHAP (SHapley Additive exPlanations)**: cada `shap_value` indica cuánto contribuyó esa variable (en escala logarítmica) a que el precio suba o baje respecto a la media de entrenamiento. Alineado con US-18 de explicabilidad del sistema.

@@ -1,0 +1,23 @@
+# Artefactos del modelo (no subir al repo — son pesados)
+models/*.pkl
+models/*.json
+data/*.csv
+data/*.json
+data/*.xlsx
+
+# Entorno Python
+.env
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.egg-info/
+
+# Logs
+*.log
