@@ -66,15 +66,17 @@ class PrediccionVentaRequest(BaseModel):
         default=True,
         description="True si el inmueble tiene vista hacia el exterior.",
     )
-    anio: int = Field(
-        default_factory=lambda: datetime.now().year,
+    anio: int | None = Field(
+        default=None,
         ge=2016, le=2030,
-        description="Año para la predicción (por defecto: año actual).",
+        description="Año para la predicción (opcional). Si se omite, el backend lo calcula automáticamente con el año actual.",
+        examples=[None],
     )
-    trimestre: int = Field(
-        default_factory=lambda: (datetime.now().month - 1) // 3 + 1,
+    trimestre: int | None = Field(
+        default=None,
         ge=1, le=4,
-        description="Trimestre para la predicción (1–4, por defecto: trimestre actual).",
+        description="Trimestre para la predicción (opcional, 1–4). Si se omite, el backend lo calcula automáticamente con la fecha actual.",
+        examples=[None],
     )
 
     @field_validator("distrito")
@@ -102,8 +104,6 @@ class PrediccionVentaRequest(BaseModel):
             "piso": 5,
             "antiguedad": 8,
             "vista_exterior": True,
-            "anio": 2025,
-            "trimestre": 2,
         }
     }}
 

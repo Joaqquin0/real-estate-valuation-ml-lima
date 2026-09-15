@@ -122,11 +122,10 @@ Predice el precio de venta de un inmueble.
   "garajes": 1,
   "piso": 5,
   "antiguedad": 8,
-  "vista_exterior": true,
-  "anio": 2025,
-  "trimestre": 2
+  "vista_exterior": true
 }
 ```
+> **Nota:** `anio` y `trimestre` son opcionales. Si se omiten, el servicio los calcula automáticamente según la fecha actual del sistema.
 
 **Response (200):**
 ```json

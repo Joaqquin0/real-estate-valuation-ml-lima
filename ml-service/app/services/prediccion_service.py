@@ -141,14 +141,19 @@ def predecir_venta(
     ctx = state.data_provider.get_distrito_context(req.distrito)  # type: ignore[union-attr]
 
     # ── 3. Construir fila de features ─────────────────────────────────────────
+    from datetime import datetime
+    ahora = datetime.now()
+    anio: int = req.anio if req.anio is not None else ahora.year
+    trimestre: int = req.trimestre if req.trimestre is not None else ((ahora.month - 1) // 3 + 1)
+
     sup = req.superficie
     hab = req.habitaciones
     ban = req.banios
     gar = req.garajes
 
     fila: dict[str, float] = {
-        "Anio":                        float(req.anio),
-        "Trimestre":                   float(req.trimestre),
+        "Anio":                        float(anio),
+        "Trimestre":                   float(trimestre),
         "Superficie":                  sup,
         "Habitaciones":                float(hab),
         "Banios":                      float(ban),
@@ -175,7 +180,7 @@ def predecir_venta(
         "dist_universidad_km":         float(ctx.get("dist_universidad_km", 0)),
         "densidad_hab_km2":            float(ctx.get("densidad_hab_km2", 0)),
         # Features engineered (replicadas de 02_preprocesamiento.py)
-        "periodo_numerico":            float(req.anio * 4 + req.trimestre),
+        "periodo_numerico":            float(anio * 4 + trimestre),
         "m2_por_habitacion":           sup / (hab + 1),
         "ratio_banios_hab":            ban / (hab + 0.1),
         "tiene_garaje":                1.0 if gar > 0 else 0.0,
