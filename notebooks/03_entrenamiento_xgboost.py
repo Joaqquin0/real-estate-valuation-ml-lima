@@ -7,8 +7,13 @@
 # CRISP-DM: Fase 3 - Modelado
 # Historia Tecnica: TH-02 (Entrenar modelo de venta)
 #
-# Input:  train.csv, test.csv (generados por 02_preprocesamiento.py)
-# Output: xgboost_venta.pkl, metricas, graficos SHAP
+# Fuente unica de datos: BCRP (Banco Central de Reserva del Peru)
+# Dataset de entrenamiento: train.csv (BCRP 2016-2023, 44,173 registros)
+# Evaluacion out-of-time: test.csv (BCRP 2024-2025, 23,741 registros)
+#
+# Input:  train.csv (BCRP 2016-2023 — particion temporal de entrenamiento)
+#         test.csv (BCRP 2024-2025 — nunca tocado durante entrenamiento)
+# Output: xgboost_venta_v2.pkl, metricas, graficos SHAP
 # =============================================================================
 
 # %% [markdown]
@@ -66,6 +71,8 @@ RANDOM_SEED = 42
 MAPE_BENCHMARK = 17.89  # Oporto et al. (2024)
 
 # %% Cargar datos
+# train.csv: BCRP (2016-2023) — particion temporal de entrenamiento
+# test.csv: BCRP 2024-2025 — sin modificar (evaluacion out-of-time pura)
 df_train = pd.read_csv(os.path.join(DATA_DIR, "train.csv"))
 df_test = pd.read_csv(os.path.join(DATA_DIR, "test.csv"))
 
@@ -91,6 +98,12 @@ y_test_real = df_test[TARGET]
 
 print(f"\nX_train: {X_train.shape}")
 print(f"X_test:  {X_test.shape}")
+
+# %% Ponderación temporal (E1)
+DECAY = 0.85
+ANIO_REF = 2023
+sample_weights = df_train["Anio"].apply(lambda y: DECAY ** (ANIO_REF - y) if y <= ANIO_REF else 1.0).values
+print(f"Ponderacion temporal E1: min={sample_weights.min():.3f}, media={sample_weights.mean():.3f}, max={sample_weights.max():.3f}")
 
 # %% [markdown]
 # ## 2. Funciones de Evaluacion
@@ -158,6 +171,7 @@ start = time.time()
 modelo_baseline = XGBRegressor(**params_baseline)
 modelo_baseline.fit(
     X_train, y_train_log,
+    sample_weight=sample_weights,
     eval_set=[(X_test, y_test_log)],
     verbose=100,
 )
@@ -222,35 +236,39 @@ try:
 
     def objective(trial):
         params = {
-            "n_estimators": trial.suggest_int("n_estimators", 100, 1000),
-            "max_depth": trial.suggest_int("max_depth", 3, 10),
-            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
-            "subsample": trial.suggest_float("subsample", 0.6, 1.0),
-            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
-            "reg_alpha": trial.suggest_float("reg_alpha", 1e-3, 10.0, log=True),
-            "reg_lambda": trial.suggest_float("reg_lambda", 1e-3, 10.0, log=True),
-            "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
+            "n_estimators": trial.suggest_int("n_estimators", 400, 1000),
+            "max_depth": trial.suggest_int("max_depth", 3, 5),
+            "learning_rate": trial.suggest_float("learning_rate", 0.02, 0.12, log=True),
+            "subsample": trial.suggest_float("subsample", 0.75, 0.95),
+            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.75, 0.95),
+            "reg_alpha": trial.suggest_float("reg_alpha", 0.5, 8.0, log=True),
+            "reg_lambda": trial.suggest_float("reg_lambda", 0.01, 2.0, log=True),
+            "min_child_weight": trial.suggest_int("min_child_weight", 5, 15),
             "random_state": RANDOM_SEED,
             "n_jobs": -1,
             "tree_method": "hist",
         }
 
-        modelo = XGBRegressor(**params)
         tscv = TimeSeriesSplit(n_splits=5)
-
-        scores = cross_val_score(
-            modelo, X_train, y_train_log,
-            cv=tscv,
-            scoring="neg_mean_absolute_percentage_error",
-            n_jobs=1,
-        )
-        return -scores.mean()  # Minimizar MAPE
+        fold_scores = []
+        for train_idx, val_idx in tscv.split(X_train):
+            X_tr, X_va = X_train.iloc[train_idx], X_train.iloc[val_idx]
+            y_tr, y_va = y_train_log.iloc[train_idx], y_train_log.iloc[val_idx]
+            w_tr = sample_weights[train_idx]
+            
+            mod = XGBRegressor(**params)
+            mod.fit(X_tr, y_tr, sample_weight=w_tr, verbose=False)
+            pred_va = mod.predict(X_va)
+            score = mean_absolute_percentage_error(np.expm1(y_va), np.expm1(pred_va))
+            fold_scores.append(score)
+        
+        return np.mean(fold_scores)
 
     study = optuna.create_study(direction="minimize")
     study.optimize(
         objective,
-        n_trials=60,       # Ajustar si tarda mucho (minimo 30)
-        timeout=900,        # Maximo 15 minutos
+        n_trials=30,
+        timeout=300,
         show_progress_bar=True,
     )
 
@@ -283,6 +301,7 @@ start = time.time()
 modelo_final = XGBRegressor(**best_params)
 modelo_final.fit(
     X_train, y_train_log,
+    sample_weight=sample_weights,
     eval_set=[(X_test, y_test_log)],
     verbose=100,
 )
@@ -314,23 +333,26 @@ for metric in ["MAE", "RMSE", "MAPE", "R2"]:
 # ## 7. Guardar Modelo
 
 # %% Guardar
-model_path = os.path.join(MODELS_DIR, "xgboost_venta.pkl")
+# Modelo final oficial V2 (BCRP 2016-2025)
+model_path = os.path.join(MODELS_DIR, "xgboost_venta_v2.pkl")
 joblib.dump(modelo_final, model_path)
 
 # Guardar hiperparametros
-params_path = os.path.join(MODELS_DIR, "xgboost_venta_params.json")
+params_path = os.path.join(MODELS_DIR, "xgboost_venta_v2_params.json")
 with open(params_path, "w") as f:
     json.dump(best_params, f, indent=2, default=str)
 
 # Guardar metricas
 metricas_export = {
+    "train_source": "train.csv (BCRP 2016-2023 oficial)",
+    "train_rows": len(df_train),
     "baseline_test": metricas_baseline,
     "final_test": metricas_final,
     "final_train": metricas_train_final,
     "benchmark_oporto": MAPE_BENCHMARK,
     "aprobado": metricas_final["MAPE"] < MAPE_BENCHMARK,
 }
-metricas_path = os.path.join(MODELS_DIR, "xgboost_venta_metricas.json")
+metricas_path = os.path.join(MODELS_DIR, "xgboost_venta_v2_metricas.json")
 with open(metricas_path, "w") as f:
     json.dump(metricas_export, f, indent=2, default=str)
 

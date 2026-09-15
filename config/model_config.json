@@ -1,0 +1,44 @@
+{
+  "model": {
+    "path": "models/xgboost_venta_v2.pkl",
+    "version": "V2",
+    "algoritmo": "XGBRegressor v1.7.6",
+    "mape_test": 15.04,
+    "r2_test": 0.7470,
+    "mae_test": 52166,
+    "features": 33,
+    "train_rows": 43466,
+    "test_rows": 23741,
+    "fecha_entrenamiento": "2026-09",
+    "benchmark_oporto_2024": 17.89
+  },
+  "ipc_lima": {
+    "valor": 169.18,
+    "valor_exacto": 169.1771184,
+    "factor": 1.6918,
+    "periodo": "2026-Q1",
+    "fuente": "INEI/BCRP serie PN01270PM",
+    "base": "Diciembre 2009 = 100",
+    "fecha_publicacion_inei": "2026-02-07",
+    "fecha_actualizacion_config": "2026-08-01",
+    "actualizado_por": "Joaquin Cortez",
+    "nota": "Ultimo periodo con dato oficial publicado al momento del estudio. Actualizar el primer viernes de cada mes segun publicacion INEI.",
+    "url_fuente": "https://estadisticas.bcrp.gob.pe/estadisticas/series/api/PN01270PM"
+  },
+  "intervalos_confianza": {
+    "mape_referencia": 0.1504,
+    "descripcion": "Intervalo = precio_nominal * (1 +/- MAPE). MAPE calculado sobre Test Set 2024-2025 (23,741 obs).",
+    "uso": "ic_inf = pred_nominal * (1 - mape_referencia); ic_sup = pred_nominal * (1 + mape_referencia)"
+  },
+  "inferencia": {
+    "target": "Precio_Soles_Const",
+    "transformacion_target": "log1p(y) para entrenamiento; expm1(y_hat) para inferencia",
+    "pipeline_inferencia": [
+      "1. Construir vector de 33 features",
+      "2. modelo.predict(X) -> pred_log",
+      "3. pred_const = expm1(pred_log)  # Soles Constantes (para comparar MAPE)",
+      "4. pred_nominal = pred_const * factor_ipc  # Soles Nominales (para usuario)",
+      "5. ic = pred_nominal * [1 - mape, 1 + mape]  # Intervalo de confianza"
+    ]
+  }
+}
