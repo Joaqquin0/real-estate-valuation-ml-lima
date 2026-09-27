@@ -43,7 +43,8 @@ warnings.filterwarnings("ignore")
 # Rutas locales
 # =============================================
 BASE_DIR = r"d:\NuevaCarpetaLool\python_modelo_tesis"
-DATASET_PATH = os.path.join(BASE_DIR, "data", "raw", "dataset_entrenamiento_final_imputado.xlsx")
+DATASET_PATH = os.path.join(BASE_DIR, "data", "raw", "dataset_entrenamiento_venta_2025.xlsx")
+CONTEXT_PATH = os.path.join(BASE_DIR, "data", "processed", "distrito_anio_contexto.csv")
 OUTPUT_DIR = os.path.join(BASE_DIR, "data", "processed")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -53,10 +54,9 @@ TARGET = "Precio_Soles_Const"
 
 # Columnas a ELIMINAR (no entran al modelo)
 COLS_ELIMINAR = [
-    # Identificadores
+    # Identificadores y targets alternativos
     "ID",
     "Ubigeo",
-    # Targets alternativos (son versiones del precio que no usamos)
     "Precio_Dolares",
     "Precio_Soles",
     "precio_dolares_m2",
@@ -81,34 +81,61 @@ TEST_YEARS = list(range(2024, 2026))   # 2024–2025
 RANDOM_SEED = 42
 
 # %% [markdown]
-# ## 2. Carga de Datos
+# ## 2. Carga y Normalización del Dataset BCRP de Venta
 
-# %% Cargar dataset
+# %% Cargar dataset crudo BCRP Venta
+print(f"Cargando dataset BCRP Venta: {DATASET_PATH}")
 df = pd.read_excel(DATASET_PATH)
-print(f"Dataset original: {df.shape[0]:,} filas x {df.shape[1]} columnas")
+print(f"Dataset BCRP Venta original: {df.shape[0]:,} filas x {df.shape[1]} columnas")
+
+# Normalizar nombres de columnas a formato estándar
+df = df.rename(columns={
+    df.columns[1]: "Anio",
+    df.columns[2]: "Trimestre",
+    df.columns[3]: "Precio_Dolares",
+    df.columns[4]: "Tipo_Cambio",
+    df.columns[5]: "IPC",
+    df.columns[6]: "Precio_Soles",
+    df.columns[7]: TARGET,
+    df.columns[8]: "Distrito",
+    df.columns[9]: "Superficie",
+    df.columns[10]: "Habitaciones",
+    df.columns[11]: "Banios",
+    df.columns[12]: "Garajes",
+    df.columns[13]: "Piso",
+    df.columns[14]: "Vista_Exterior",
+    df.columns[15]: "Antiguedad",
+})
+
+if "Unnamed: 0" in df.columns:
+    df = df.drop(columns=["Unnamed: 0"])
+
+# Filtrar registros sin antigüedad (1,722 filas) para alinear con base histórica limpia
+df = df.dropna(subset=["Antiguedad"]).copy()
+
+# Descartar distritos atípicos con <= 1 registro (Callao, SJL, San Luis, SMP)
+conteos = df["Distrito"].value_counts()
+distritos_invalidos = conteos[conteos <= 1].index.tolist()
+if distritos_invalidos:
+    print(f"Excluyendo distritos con <= 1 registro: {distritos_invalidos}")
+    df = df[~df["Distrito"].isin(distritos_invalidos)].copy()
+
+print(f"Filas de venta tras limpieza física y distrital: {df.shape[0]:,} en {df['Distrito'].nunique()} distritos")
 
 # %% [markdown]
-# ## 3. Separar Flags de Imputación
-# Los flags se guardan aparte para análisis de sensibilidad posterior
-# (comparar métricas con/sin datos imputados), pero NO entran como features.
+# ## 3. Fusión con Tabla Maestra de Contexto (distrito_anio_contexto.csv)
+df_ctx = pd.read_csv(CONTEXT_PATH)
+df = df.merge(df_ctx, on=["Distrito", "Anio"], how="inner")
+print(f"Merge dinámico exitoso: {df.shape[0]:,} filas x {df.shape[1]} columnas")
 
-# %% Guardar flags
+# %% [markdown]
+# ## 4. Separar Flags de Imputación
 cols_flags_existentes = [c for c in COLS_FLAGS if c in df.columns]
 df_flags = df[["Anio", "Distrito"] + cols_flags_existentes].copy()
 print(f"Flags de imputación separados: {cols_flags_existentes}")
 
 # %% [markdown]
-# ## 4. Eliminar Columnas No Predictivas
-#
-# **Razones de eliminación:**
-# - `ID`, `Ubigeo`: identificadores sin valor predictivo
-# - `Precio_Dolares`, `Precio_Soles`, `precio_dolares_m2`: son el target en otras unidades
-# - `IPC`: correlación 0.969 con `Anio` + el target ya está deflactado por IPC (circular)
-# - `Tipo_Cambio`: el precio ya está en soles constantes
-# - `tasa_denuncias`: correlación 0.928 con `tasa_hurto` (es la suma de robo + hurto)
-# - Flags de imputación: solo para análisis de sensibilidad
-
-# %% Eliminar columnas
+# ## 5. Eliminar Columnas No Predictivas
 cols_a_eliminar = [c for c in COLS_ELIMINAR + COLS_FLAGS if c in df.columns]
 df = df.drop(columns=cols_a_eliminar)
 

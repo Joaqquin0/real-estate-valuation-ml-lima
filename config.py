@@ -17,13 +17,13 @@ DATA_PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 REPORTS_DIR = os.path.join(BASE_DIR, "reports", "figures")
 
-# Archivo fuente Venta
-DATASET_FILENAME = "dataset_entrenamiento_final_imputado.xlsx"
+# Archivo fuente Venta (BCRP base)
+DATASET_FILENAME = "dataset_entrenamiento_venta_2025.xlsx"
 DATASET_PATH = os.path.join(DATA_RAW_DIR, DATASET_FILENAME)
 
-# Archivo fuente Alquiler
+# Archivo fuente Alquiler (BCRP base)
 DATASET_ALQUILER_FILENAME = "dataset_entrenamineto_alquiler_2025.xlsx"
-DATASET_ALQUILER_PATH = os.path.join(BASE_DIR, DATASET_ALQUILER_FILENAME)
+DATASET_ALQUILER_PATH = os.path.join(DATA_RAW_DIR, DATASET_ALQUILER_FILENAME)
 DISTRICT_CONTEXT_PATH = os.path.join(DATA_PROCESSED_DIR, "distrito_anio_contexto.csv")
 
 # Archivos procesados Venta

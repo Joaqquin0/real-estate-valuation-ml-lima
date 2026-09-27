@@ -65209,7 +65209,6 @@ Anio,Distrito,nse_imputado,tasas_criminalidad_imputada,poblacion_imputada,split
 2025,Breña,False,False,False,test
 2025,Breña,False,False,False,test
 2025,Breña,False,False,False,test
-2025,Callao,False,False,False,test
 2025,Carabayllo,False,False,False,test
 2025,Carabayllo,False,False,False,test
 2025,Carabayllo,False,False,False,test
@@ -66517,9 +66516,6 @@ Anio,Distrito,nse_imputado,tasas_criminalidad_imputada,poblacion_imputada,split
 2025,San Isidro,False,False,False,test
 2025,San Isidro,False,False,False,test
 2025,San Isidro,False,False,False,test
-2025,San Juan de Lurigancho,False,False,False,test
-2025,San Luis,True,False,False,test
-2025,San Martín de Porres,False,False,False,test
 2025,San Miguel,False,False,False,test
 2025,San Miguel,False,False,False,test
 2025,San Miguel,False,False,False,test

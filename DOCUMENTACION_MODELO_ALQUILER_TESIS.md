@@ -114,15 +114,23 @@ En concordancia con las mejores prácticas de MLOps y el principio de *Single So
 * **Fusión Dinámica:** Se realizó un `INNER JOIN` por clave compuesta `["Distrito", "Anio"]`, logrando una **coincidencia del 100% (61,603 filas conservadas)**.
 
 #### Reglas de imputación interanual documentadas en la tabla de contexto:
-* **Nivel Socioeconómico (NSE INEI / ENAHO 2025):** 
-  Para distritos que no alcanzaron el umbral representativo de 30 hogares encuestados, se aplicó proximidad geográfica con perfil socioeconómico análogo:
-  - Lince $\rightarrow$ imputado con Jesús María.
-  - Magdalena del Mar $\rightarrow$ imputado con Pueblo Libre.
-  - Barranco $\rightarrow$ imputado con Miraflores.
-* **Tasas Delictivas (PNP 2019–2025):**
-  Al no existir serie histórica distrital delictiva estandarizada 2016–2018, los años 2016, 2017 y 2018 adoptaron las tasas distritales reportadas en 2019.
-* **Proyección Poblacional y Densidad (INEI 2018–2025):**
-  Los años 2016 y 2017 fueron imputados utilizando los registros de proyección del año 2018 del mismo distrito.
+
+| Dimensión | Fuente Oficial | Período Nativo | Regla de Imputación Aplicada | Flag de Trazabilidad |
+| :--- | :--- | :---: | :--- | :---: |
+| **Nivel Socioeconómico (NSE)** | INEI / ENAHO (`ESTRSOCIAL`) | 2025 (`FACTOR07`) | Proximidad y afinidad socioeconómica en distritos con < 30 encuestas | `nse_imputado` |
+| **Criminalidad (Robo y Hurto)** | Policía Nacional del Perú (PNP) | 2019 – 2025 | Años 2016, 2017 y 2018 imputados con datos de 2019 del mismo distrito | `tasas_criminalidad_imputada` |
+| **Demografía (Población y Densidad)** | INEI (Proyecciones Anuales) | 2018 – 2025 | Años 2016 y 2017 imputados con cifras de 2018 del mismo distrito | `poblacion_imputada` |
+
+* **Nivel Socioeconómico (NSE INEI / ENAHO):**  
+  Para distritos que no alcanzaron el umbral representativo de 30 hogares encuestados, se aplicó proximidad espacial y perfil socioeconómico consistente:
+  - **`LINCE` $\rightarrow$ Imputado con `JESUS MARIA`** (`nse_imputado = True`). Se prefirió Jesús María sobre San Isidro para evitar distorsión con estratos socioeconómicos A atípicos.
+  - **`BARRANCO` $\rightarrow$ Imputado con `MIRAFLORES`** (`nse_imputado = True`).
+  - **`MAGDALENA DEL MAR` $\rightarrow$ Imputado con `PUEBLO LIBRE`** (`nse_imputado = True`).
+  - **`SAN LUIS` $\rightarrow$ Imputado con `LA VICTORIA`** en la tabla base, pero **no se incluye en el modelado** al registrar únicamente una sola observación ($n=1$) en los datos transaccionales.
+* **Tasas Delictivas de Robo y Hurto (PNP 2019–2025):**  
+  Dado que las series estandarizadas de denuncias policiales distritales están disponibles formalmente a partir de 2019, para los años **2016, 2017 y 2018** se imputaron las tasas reportadas en **2019** del mismo distrito (`tasas_criminalidad_imputada = True`). Para 2019–2025 el flag es `False`.
+* **Proyección Poblacional y Densidad (INEI 2018–2025):**  
+  Las proyecciones demográficas distritales cubren 2018 a 2025. Los años **2016 y 2017** fueron imputados utilizando los registros del año **2018** del mismo distrito (`poblacion_imputada = True`). Para 2018–2025 el flag es `False`. La densidad se calcula anualmente como $\text{densidad\_hab\_km2}_{i,t} = \frac{\text{poblacion\_proyectada}_{d,t}}{\text{area\_distrito\_km2}_d}$.
 
 ### 4.3 Deflactación Económica del Target (BCRP)
 El alquiler mensual se normalizó en términos reales a través del IPC de Lima Metropolitana:

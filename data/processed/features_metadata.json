@@ -20,6 +20,7 @@
     "tasa_hurto",
     "poblacion_proyectada",
     "area_distrito_km2",
+    "densidad_hab_km2",
     "distancia_centro_km",
     "dist_colegio_km",
     "dist_hospital_km",
@@ -27,7 +28,6 @@
     "dist_centro_comercial_km",
     "dist_parque_km",
     "dist_universidad_km",
-    "densidad_hab_km2",
     "periodo_numerico",
     "m2_por_habitacion",
     "ratio_banios_hab",
@@ -38,7 +38,7 @@
   ],
   "n_features": 33,
   "encoding_map_distrito": {
-    "Ate Vitarte": 242771.74608304392,
+    "Ate Vitarte": 242771.7460830439,
     "Barranco": 485622.34652889665,
     "Bellavista": 238803.6523817529,
     "Breña": 228373.80779312487,
@@ -48,7 +48,7 @@
     "Comas": 171628.82186812224,
     "Jesús María": 366244.5203477085,
     "La Molina": 417835.2429383599,
-    "La Perla": 212674.0384418316,
+    "La Perla": 212674.03844183162,
     "La Victoria": 261850.21619782055,
     "Lince": 366023.8337961016,
     "Los Olivos": 238827.18880483918,
@@ -78,13 +78,10 @@
     2025
   ],
   "train_rows": 43466,
-  "test_rows": 23741,
+  "test_rows": 23737,
   "columnas_eliminadas": [
-    "ID",
-    "Ubigeo",
     "Precio_Dolares",
     "Precio_Soles",
-    "precio_dolares_m2",
     "IPC",
     "Tipo_Cambio",
     "tasa_denuncias",
@@ -94,5 +91,5 @@
   ],
   "random_seed": 42,
   "log_transform_aplicado": true,
-  "skewness_original": 1.4383985262002779
+  "skewness_original": 1.438634320685925
 }

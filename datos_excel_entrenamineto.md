@@ -45,20 +45,25 @@ Datos sacados de la INEI, se esta cosnidetando la proyeccion para todos los dist
 
 Se esta considerando unicamente el dato estatico del 2025 con el NSE ya que es un dato el cual no se puede obtener con facilidad y no tenías series históricas confiables y hubieras tenido que construirlas desde cero con mucho riesgo de huecos.
 
-# Imputacion de datos en el excel
+# Protocolo de Imputación de Datos en la Base Contextual
 
-para los valores en la** tasa de Criminalidad,** se esta imputando a los valores entre 2016 y 2017, 2018 con con los valores del año 2019, esto ya que equivalen a un 11% de los datos totales y esto dejarlo vacio no beneficiaria al entrenamietno en XGBOOSt
+### 1. Imputación de Tasas de Criminalidad (PNP)
+Para los valores de la **tasa de robo** y **tasa de hurto**, las series oficiales distritales de la PNP están disponibles del **2019 al 2025**.  
+- **Regla:** Para los años **2016, 2017 y 2018**, se imputaron las tasas correspondientes al año **2019** del mismo distrito (`tasas_criminalidad_imputada = True`).  
+- **Justificación:** Estas observaciones representan aproximadamente el 11% de las transacciones históricas del BCRP. Dejarlas vacías o descartarlas reduciría innecesariamente el volumen de entrenamiento de XGBoost.
 
-Igualemnte la poblacion_proyecta entre los años 2016 y 2017 se usaron los datos del año 2018
+### 2. Imputación de Población Proyectada y Densidad (INEI)
+Las proyecciones demográficas del INEI cubren formalmente los años **2018 al 2025**.  
+- **Regla:** Para los años **2016 y 2017**, se utilizaron las proyecciones distritales del año **2018** (`poblacion_imputada = True`).  
+- **Densidad habitacional:** Se calcula dinámicamente como $\text{densidad\_hab\_km2} = \frac{\text{poblacion\_proyectada}}{\text{area\_distrito\_km2}}$.
 
-## Imputacion de NSE en el excel final
-
-Al aplicar el criterio de proximidad geográfica pura, se identificó que, para los distritos de Lince y San Luis, el vecino colindante más cercano correspondía a un distrito con un perfil socioeconómico significativamente atípico respecto al distrito a imputar (San Isidro y San Borja, respectivamente, ambos caracterizados por una concentración de NSE A considerablemente superior al promedio de Lima Metropolitana). Dado que el objetivo de la imputación es aproximar el NSE real del distrito faltante y no únicamente minimizar la distancia euclidiana, se optó por sustituir el vecino asignado automáticamente por el distrito colindante con el perfil socioeconómico más representativo del entorno inmediato: Jesús María para Lince y La Victoria para San Luis, ambos con menor distancia relativa de la que introduce un valor atípico y con una composición socioeconómica más consistente con la del distrito imputado.
-(10454 datos total)
-Barracon: Miraflores
-Magdalena: Pueblo lIbre
-Lince: Jesus maria
-sAN LUYIS: Victoria
+### 3. Imputación de NSE (INEI / ENAHO)
+Siguiendo el umbral de representatividad de mínimo 30 encuestas por distrito, 4 distritos requirieron tratamiento:
+- Al aplicar proximidad geográfica pura, Lince colindaba con San Isidro y San Luis con San Borja. Dado que San Isidro y San Borja poseen una concentración de estrato A atípica que distorsionaría la estimación, se priorizó la **afinidad del perfil socioeconómico**:
+  - **`LINCE`** $\rightarrow$ Imputado con **`JESUS MARIA`** (`nse_imputado = True`).
+  - **`BARRANCO`** $\rightarrow$ Imputado con **`MIRAFLORES`** (`nse_imputado = True`).
+  - **`MAGDALENA DEL MAR`** $\rightarrow$ Imputado con **`PUEBLO LIBRE`** (`nse_imputado = True`).
+  - **`SAN LUIS`** $\rightarrow$ Imputado con **`LA VICTORIA`** en la base contextual, pero **excluido del entrenamiento** de los modelos al contar con una única observación ($n=1$) en los registros transaccionales.
 
 # Precios de venta del BCRP
 
