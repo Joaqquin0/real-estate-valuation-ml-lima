@@ -93,30 +93,21 @@ CONTEXT_COLS = [
     "densidad_hab_km2",
 ]
 
-# Usar el CSV precomputado de contexto distrital
-# (generado desde el Excel maestro, filtrando train 2016-2023)
-CONTEXT_REF_PATH = os.path.join(DATA_DIR, "distrito_contexto_ref.csv")
+# Usar la tabla maestra de contexto distrital por anio (distrito_anio_contexto.csv)
+CONTEXT_REF_PATH = os.path.join(DATA_DIR, "distrito_anio_contexto.csv")
 if os.path.exists(CONTEXT_REF_PATH):
     distrito_context = pd.read_csv(CONTEXT_REF_PATH)
     print(f"[OK] Referencia contextual cargada: {CONTEXT_REF_PATH}")
 else:
-    # Fallback: leer desde el Excel maestro (mas lento)
-    print("[INFO] distrito_contexto_ref.csv no encontrado. Leyendo desde Excel...")
+    # Fallback: leer desde el Excel maestro
+    print("[INFO] distrito_anio_contexto.csv no encontrado. Leyendo desde Excel...")
     EXCEL_PATH = os.path.join(BASE_DIR, "data", "raw", "dataset_entrenamiento_final_imputado.xlsx")
     df_raw = pd.read_excel(EXCEL_PATH)
-    df_train_raw = df_raw[df_raw["Anio"] <= 2023]
-    distrito_context = (
-        df_train_raw.sort_values("Anio", ascending=False)
-        .groupby("Distrito")[CONTEXT_COLS]
-        .first()
-        .reset_index()
-    )
-    distrito_context.to_csv(CONTEXT_REF_PATH, index=False)
-    print(f"[OK] CSV de referencia generado y guardado en {CONTEXT_REF_PATH}")
+    distrito_context = df_raw.groupby(["Distrito", "Anio"])[CONTEXT_COLS].first().reset_index()
 
 # Fallback de medias globales (para distritos fuera del encoding)
 global_means = {c: distrito_context[c].mean() for c in CONTEXT_COLS}
-print(f"[OK] Referencia contextual para {len(distrito_context)} distritos")
+print(f"[OK] Referencia contextual cargada ({len(distrito_context)} registros distrito-año)")
 
 # =============================================================================
 # 3. FUNCION PRINCIPAL DE PREDICCION
@@ -135,7 +126,11 @@ def predecir(distrito, superficie, habitaciones, banios, garajes, piso,
             f"Sugeridos: {sugeridos}\nDisponibles: {disponibles}"
         )
 
-    ctx = distrito_context[distrito_context["Distrito"] == distrito]
+    # Filtrar por distrito y año; si no existe el anio exacto, usar el anio mas reciente disponible
+    ctx = distrito_context[(distrito_context["Distrito"] == distrito) & (distrito_context["Anio"] == anio)]
+    if ctx.empty:
+        ctx = distrito_context[distrito_context["Distrito"] == distrito].sort_values("Anio").tail(1)
+
     ctx_vals = ctx.iloc[0][CONTEXT_COLS].to_dict() if not ctx.empty else global_means
 
     fila = {

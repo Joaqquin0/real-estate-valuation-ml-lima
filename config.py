@@ -17,19 +17,34 @@ DATA_PROCESSED_DIR = os.path.join(BASE_DIR, "data", "processed")
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 REPORTS_DIR = os.path.join(BASE_DIR, "reports", "figures")
 
-# Archivo fuente
+# Archivo fuente Venta
 DATASET_FILENAME = "dataset_entrenamiento_final_imputado.xlsx"
 DATASET_PATH = os.path.join(DATA_RAW_DIR, DATASET_FILENAME)
 
-# Archivos procesados
+# Archivo fuente Alquiler
+DATASET_ALQUILER_FILENAME = "dataset_entrenamineto_alquiler_2025.xlsx"
+DATASET_ALQUILER_PATH = os.path.join(BASE_DIR, DATASET_ALQUILER_FILENAME)
+DISTRICT_CONTEXT_PATH = os.path.join(DATA_PROCESSED_DIR, "distrito_anio_contexto.csv")
+
+# Archivos procesados Venta
 TRAIN_PATH = os.path.join(DATA_PROCESSED_DIR, "train.csv")
 TEST_PATH = os.path.join(DATA_PROCESSED_DIR, "test.csv")
 FEATURES_METADATA_PATH = os.path.join(DATA_PROCESSED_DIR, "features_metadata.json")
 
+# Archivos procesados Alquiler
+TRAIN_ALQUILER_PATH = os.path.join(DATA_PROCESSED_DIR, "train_alquiler.csv")
+TEST_ALQUILER_PATH = os.path.join(DATA_PROCESSED_DIR, "test_alquiler.csv")
+FEATURES_METADATA_ALQUILER_PATH = os.path.join(DATA_PROCESSED_DIR, "features_metadata_alquiler.json")
+
+# Modelos guardados
+MODEL_VENTA_PATH = os.path.join(MODELS_DIR, "xgboost_venta_v2.pkl")
+MODEL_ALQUILER_PATH = os.path.join(MODELS_DIR, "xgboost_alquiler_v1.pkl")
+
 # ============================================================
-# VARIABLE TARGET
+# VARIABLES TARGET
 # ============================================================
 TARGET_COL = "Precio_Soles_Const"
+TARGET_ALQUILER_COL = "Alquiler_Soles_Const"
 
 # ============================================================
 # COLUMNAS POR CATEGORÍA
