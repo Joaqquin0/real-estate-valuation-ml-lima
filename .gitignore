@@ -3,3 +3,6 @@ datos_excel_entrenamiento.md
 DOCUMENTACION_MODELO_TESIS.md
 implementation_plan.md
 TI_cortez_antigravity.md
+.env
+__pycache__/
+*.pyc
