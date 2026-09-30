@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS distrito_anio_contexto (
     
     -- Demografía y Densidad (INEI 2018-2025; 2016-2017 imputado)
     poblacion_proyectada INTEGER NOT NULL CHECK (poblacion_proyectada > 0),
+    area_distrito_km2 DECIMAL(10, 4) NOT NULL CHECK (area_distrito_km2 > 0),
     densidad_hab_km2 DECIMAL(12, 4) NOT NULL CHECK (densidad_hab_km2 > 0),
     
     -- Distancias Cartográficas y Equipamiento Urbano (OpenStreetMap / INEI)

@@ -67,6 +67,7 @@ def transform_contexto_distrital(df_contexto: pd.DataFrame, distrito_id_map: dic
         "tasa_hurto": "tasa_hurto",
         "tasa_denuncias": "tasa_denuncias",
         "poblacion_proyectada": "poblacion_proyectada",
+        "area_distrito_km2": "area_distrito_km2",
         "densidad_hab_km2": "densidad_hab_km2",
         "distancia_centro_km": "distancia_centro_km",
         "dist_colegio_km": "dist_colegio_km",

@@ -37,7 +37,7 @@ def load_training_dataset_venta(split: str = None) -> pd.DataFrame:
         -- Contexto Distrital Anual
         c.pct_nse_a, c.pct_nse_b, c.pct_nse_c, c.pct_nse_d, c.pct_nse_e,
         c.tasa_robo, c.tasa_hurto, c.tasa_denuncias,
-        c.poblacion_proyectada, c.densidad_hab_km2,
+        c.poblacion_proyectada, c.area_distrito_km2, c.densidad_hab_km2,
         c.distancia_centro_km, c.dist_colegio_km, c.dist_hospital_km,
         c.dist_estacion_transporte_km, c.dist_centro_comercial_km,
         c.dist_parque_km, c.dist_universidad_km
@@ -81,7 +81,7 @@ def load_training_dataset_alquiler(split: str = None) -> pd.DataFrame:
         -- Contexto Distrital Anual
         c.pct_nse_a, c.pct_nse_b, c.pct_nse_c, c.pct_nse_d, c.pct_nse_e,
         c.tasa_robo, c.tasa_hurto, c.tasa_denuncias,
-        c.poblacion_proyectada, c.densidad_hab_km2,
+        c.poblacion_proyectada, c.area_distrito_km2, c.densidad_hab_km2,
         c.distancia_centro_km, c.dist_colegio_km, c.dist_hospital_km,
         c.dist_estacion_transporte_km, c.dist_centro_comercial_km,
         c.dist_parque_km, c.dist_universidad_km
