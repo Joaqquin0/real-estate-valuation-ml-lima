@@ -61,6 +61,27 @@ df_train = load_training_dataset_venta(split="TRAIN")
 df_test  = load_training_dataset_venta(split="TEST")
 ```
 
+### 1.1. Cobertura Geográfica: 22 Distritos Comunes vs Exclusiones BCRP ($n=1$)
+
+* **En Venta (`dataset_entrenamiento_venta_2025.xlsx`):** 26 distritos crudos (69,636 filas).
+  * Los **22 distritos modelados** representan 69,632 filas (**99.994%** del total).
+  * 4 distritos atípicos con solo **1 observación** en 10 años ($n=1$): *Callao Cercado, San Juan de Lurigancho, San Luis, San Martín de Porres*.
+* **En Alquiler (`dataset_entrenamineto_alquiler_2025.xlsx`):** 24 distritos crudos (61,605 filas).
+  * Los **22 distritos modelados** representan 61,603 filas (**99.997%** del total).
+  * 2 distritos atípicos con solo **1 observación** en 10 años ($n=1$): *San Juan de Miraflores, Santa Anita*.
+* **Criterio de Alineación para Rentabilidad:** Al enfocar el modelo en los **mismos 22 distritos comunes**, se garantiza que cualquier inmueble tasado pueda proyectar tanto su precio de venta como su canon de alquiler, permitiendo calcular el retorno de inversión (*Gross Rental Yield* / *Cap Rate*) sin inconsistencias de cobertura.
+
+### 1.2. Protocolo de Imputaciones Socioeconómicas (NSE - ENAHO 2025)
+
+El cálculo de estratos socioeconómicos (NSE A al E) utiliza la Encuesta Nacional de Hogares (ENAHO Sumaria 2025) con factor de expansión muestral (`FACTOR07`) y un umbral mínimo de representatividad de **30 hogares encuestados**:
+* **Distritos con Muestra Propia Robusta:** Distritos con $\ge 30$ hogares encuestados se calculan directamente.
+  * **Caso Especial Ate Vitarte:** En la base ENAHO oficial figura como `Ate` (UBIGEO `150103`) con **194 hogares encuestados**. No requirió imputación artificial; cuenta con sus porcentajes reales oficiales: **A: 1.33%, B: 5.60%, C: 14.35%, D: 53.18%, E: 25.53%** con `nse_imputado = False`.
+* **Protocolo de "Distrito Hermano Socioeconómico y Urbano" (Muestra $<30$ hogares):**
+  Para evitar sesgos por contigüidad puramente geométrica, los distritos con muestra censal insuficiente se imputaron con vecinos de idéntico perfil residencial e inmobiliario:
+  * **Lince $\rightarrow$ Jesús María:** Ambos distritos consolidados de Lima Moderna con perfil socioeconómico medio B/C *(se descartó San Isidro por tener un perfil predominantemente A/B que sobrestimaría a Lince)*.
+  * **Barranco $\rightarrow$ Miraflores:** Ambos distritos del eje costero de Lima Top con perfil predominante A/B.
+  * **Magdalena $\rightarrow$ Pueblo Libre:** Ambos distritos tradicionales de Lima Moderna con perfil medio B/C.
+
 ---
 
 ## 2. Verificación de las 33 Features del Modelo (Training-Serving Parity)

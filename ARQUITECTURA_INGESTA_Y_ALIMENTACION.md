@@ -46,7 +46,14 @@ Para construir la capa socioeconómica, geográfica y de seguridad sin sobrecarg
   1. Filtrado geográfico de Lima Metropolitana (`1501xx`) y Callao (`0701xx`).
   2. Filtrado de hogares principales (`HOGAR == 11`).
   3. Cálculo ponderado de la distribución de estratos socioeconómicos (`ESTRSOCIAL`: 1 al 5 $\rightarrow$ NSE A al E) utilizando el factor de expansión muestral oficial del INEI (`FACTOR07`).
-  4. **Control de representatividad estadística:** Se impuso un umbral mínimo de **30 hogares encuestados** por distrito (`UMBRAL_MINIMO = 30`). Los distritos con muestra inferior quedaron marcados para el protocolo de imputación por afinidad socioeconómica y proximidad geográfica.
+  4. **Control de representatividad estadística (Umbral $\ge 30$ hogares):**
+     * **Distritos con muestra suficiente:** Calculados directamente con sus microdatos oficiales.
+     * **Caso Especial Ate Vitarte:** En la ENAHO (UBIGEO `150103`), Ate cuenta con **194 hogares encuestados** (muestra robusta). Registra su perfil oficial real: **A: 1.33%, B: 5.60%, C: 14.35%, D: 53.18%, E: 25.53%** con `nse_imputado = False`.
+     * **Protocolo de "Distrito Hermano Socioeconómico y Urbano" (Muestra $<30$ hogares):**  
+       Para distritos residenciales que no alcanzaron el umbral censal en la encuesta anual, se descartó la contigüidad geométrica ciega (para no distorsionar perfiles) y se emparejaron con distritos del mismo estrato socioeconómico y dinámica inmobiliaria:
+       * **Lince $\rightarrow$ Jesús María** *(se descartó San Isidro porque su perfil A/B sesgaba a Lince, que es de perfil clase media B/C)*.
+       * **Barranco $\rightarrow$ Miraflores** *(ambos eje costero Lima Top A/B)*.
+       * **Magdalena $\rightarrow$ Pueblo Libre** *(ambos Lima Moderna tradicional B/C)*.
 
 ### 2.2. Demografía y Densidad — INEI ([`densidad-poblacional.py`](file:///d:/NuevaCarpetaLool/python_modelo_tesis/densidad-poblacional.py))
 * **Fuente Primaria:** Proyecciones poblacionales distritales oficiales del INEI 2018–2025 (`poblacion_proyectada.xlsx`).
@@ -86,7 +93,20 @@ Toda esta información quedó consolidada en una única tabla maestra:
 
 Esta etapa es la que se ejecuta periódicamente (por ejemplo, cada trimestre cuando el BCRP publica nuevos reportes o se reciben nuevas ofertas de mercado).
 
-### ¿Qué hace el orquestador [`src/etl/run_etl.py`](file:///d:/NuevaCarpetaLool/python_modelo_tesis/src/etl/run_etl.py)?
+### 3.1. Alcance Geográfico: 22 Distritos Modelados vs Exclusiones BCRP ($n=1$)
+Al analizar los archivos originales del BCRP (2016–2025), se observa la siguiente distribución:
+* **En Venta (`dataset_entrenamiento_venta_2025.xlsx`):** Contiene 26 distritos (69,636 filas).
+  * Los **22 distritos modelados** agrupan 69,632 filas (**99.994%** del total).
+  * 4 distritos registraron solo **1 observación** en 10 años ($n=1$): *Callao Cercado, San Juan de Lurigancho, San Luis, San Martín de Porres*.
+* **En Alquiler (`dataset_entrenamineto_alquiler_2025.xlsx`):** Contiene 24 distritos (61,605 filas).
+  * Los **22 distritos modelados** agrupan 61,603 filas (**99.997%** del total).
+  * 2 distritos registraron solo **1 observación** en 10 años ($n=1$): *San Juan de Miraflores, Santa Anita*.
+
+#### Justificación Metodológica de Exclusión:
+1. **Insuficiencia Muestral:** Un modelo supervisado no puede calibrarse ni evaluarse sobre distritos con $n=1$ en 10 años por carecer de varianza y provocar sobreajuste (*overfitting*).
+2. **Cálculo de Rentabilidad (*Cap Rate*):** La aplicación web calcula la rentabilidad inmobiliaria dividiendo el alquiler anual entre el precio de venta. Por ende, es requisito de arquitectura que ambos modelos cubran exactamente el mismo universo de **22 distritos con mercado formal consolidado**.
+
+### 3.2. ¿Qué hace el orquestador [`src/etl/run_etl.py`](file:///d:/NuevaCarpetaLool/python_modelo_tesis/src/etl/run_etl.py)?
 1. **Extracción:** Carga los archivos crudos de Excel del BCRP (`dataset_entrenamiento_venta_2025.xlsx` y `dataset_entrenamineto_alquiler_2025.xlsx`) y la tabla de contexto [`distrito_anio_contexto.csv`](file:///d:/NuevaCarpetaLool/python_modelo_tesis/data/processed/distrito_anio_contexto.csv).
 2. **Transformación:**
    * Filtra los 22 distritos representativos comunes.
@@ -97,7 +117,7 @@ Esta etapa es la que se ejecuta periódicamente (por ejemplo, cada trimestre cua
 3. **Carga en PostgreSQL:**
    * Sincroniza la tabla dimensional `distritos` (22 registros).
    * Sincroniza `distrito_anio_contexto` (202 registros).
-   * Inserta en bloque `dataset_inmuebles_venta` (67,910 filas) y `dataset_inmuebles_alquiler` (61,603 filas).
+   * Inserta en bloque `dataset_inmuebles_venta` (67,910 filas tras depuración de outliers físicos) y `dataset_inmuebles_alquiler` (61,603 filas).
    * Guarda los flags en `auditoria_flags_imputacion` (129,513 registros) para auditoría científica.
    * Registra el log de duración y filas procesadas en `pipeline_ejecuciones`.
 
