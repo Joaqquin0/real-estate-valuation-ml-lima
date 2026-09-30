@@ -170,7 +170,7 @@ def predecir_venta(
         "tasa_robo":                   float(ctx.get("tasa_robo", 0)),
         "tasa_hurto":                  float(ctx.get("tasa_hurto", 0)),
         "poblacion_proyectada":        float(ctx.get("poblacion_proyectada", 0)),
-        "area_distrito_km2":           float(ctx.get("area_distrito_km2", 0)),
+        "area_distrito_km2":           float(ctx.get("area_distrito_km2") or 0),
         "distancia_centro_km":         float(ctx.get("distancia_centro_km", 0)),
         "dist_colegio_km":             float(ctx.get("dist_colegio_km", 0)),
         "dist_hospital_km":            float(ctx.get("dist_hospital_km", 0)),

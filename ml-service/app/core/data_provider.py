@@ -68,11 +68,11 @@ class IContextDataProvider(ABC):
 _QUERY_CONTEXTO = """
 SELECT
     d.nombre                     AS distrito,
-    c.pct_nse_a                  AS pct_NSE_A,
-    c.pct_nse_b                  AS pct_NSE_B,
-    c.pct_nse_c                  AS pct_NSE_C,
-    c.pct_nse_d                  AS pct_NSE_D,
-    c.pct_nse_e                  AS pct_NSE_E,
+    c.pct_nse_a                  AS "pct_NSE_A",
+    c.pct_nse_b                  AS "pct_NSE_B",
+    c.pct_nse_c                  AS "pct_NSE_C",
+    c.pct_nse_d                  AS "pct_NSE_D",
+    c.pct_nse_e                  AS "pct_NSE_E",
     c.tasa_robo,
     c.tasa_hurto,
     c.poblacion_proyectada,
@@ -84,7 +84,7 @@ SELECT
     c.dist_centro_comercial_km,
     c.dist_parque_km,
     c.dist_universidad_km,
-    c.area_distrito_km2
+    NULL::float AS area_distrito_km2
 FROM distrito_anio_contexto c
 JOIN distritos d ON c.distrito_id = d.id
 WHERE (c.distrito_id, c.anio) IN (
@@ -94,6 +94,9 @@ WHERE (c.distrito_id, c.anio) IN (
 )
 ORDER BY d.nombre;
 """
+# NOTA: area_distrito_km2 se pasa como NULL (0.0 en inferencia) porque
+# la tabla distrito_anio_contexto aun no tiene esa columna.
+# Cuando se agregue a la BD, reemplazar NULL::float por c.area_distrito_km2
 
 
 class PostgreSQLContextProvider(IContextDataProvider):
@@ -127,18 +130,23 @@ class PostgreSQLContextProvider(IContextDataProvider):
         """Ejecuta la consulta y carga el contexto en memoria."""
         conn = psycopg2.connect(**self._conn_params)
         try:
-            df = pd.read_sql_query(_QUERY_CONTEXTO, conn)
+            cur = conn.cursor()
+            cur.execute(_QUERY_CONTEXTO)
+            cols = [desc[0] for desc in cur.description]
+            rows = cur.fetchall()
         finally:
             conn.close()
 
-        if df.empty:
+        if not rows:
             raise RuntimeError(
                 "La tabla 'distrito_anio_contexto' no retornó datos. "
                 "Verifica que la BD tenga datos de contexto cargados."
             )
 
-        for _, row in df.iterrows():
-            self._contexto[row["distrito"]] = row.drop("distrito").to_dict()
+        for row in rows:
+            row_dict = dict(zip(cols, row))
+            nombre = row_dict.pop("distrito")
+            self._contexto[nombre] = row_dict
 
         print(
             f"[PostgreSQLContextProvider] Cargado: {len(self._contexto)} distritos "

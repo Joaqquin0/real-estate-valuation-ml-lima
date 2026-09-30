@@ -104,8 +104,7 @@ SELECT
     c.dist_estacion_transporte_km,
     c.dist_centro_comercial_km,
     c.dist_parque_km,
-    c.dist_universidad_km,
-    c.area_distrito_km2
+    c.dist_universidad_km
 FROM dataset_inmuebles_venta v
 JOIN distritos d
     ON v.distrito_id = d.id
