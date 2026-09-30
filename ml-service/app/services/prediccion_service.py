@@ -1,21 +1,20 @@
 """
 app/services/prediccion_service.py
 ───────────────────────────────────
-Lógica pura de predicción de precio de venta.
+Lógica pura de predicción de precios para Venta y Alquiler.
 
-Extrae y formaliza la función `predecir()` del notebook
-07_validacion_prediccion.py como función sin side effects:
+Extrae y formaliza la función `predecir()` como función sin side effects:
   - Sin prints ni gráficos
-  - Sin dependencia directa de CSV o modelo (solo recibe ModelState)
+  - Sin dependencia directa de disco (recibe ModelState)
   - Retorna PrediccionVentaResponse listo para serializar
 
 Flujo por request (< 50ms):
   1. Validar distrito → HTTPException 422 si no está en encoding_map
-  2. Obtener contexto distrital via data_provider (IContextDataProvider)
+  2. Obtener contexto distrital via data_provider (PostgreSQL en memoria)
   3. Construir X_fila con las 33 features
-  4. modelo.predict(X_fila)  →  pred_const = exp(pred_log) - 1
-  5. explainer.shap_values(X_fila)  →  array[33]
-  6. Seleccionar top N por |shap_val|  →  lista de ContribucionFeature
+  4. modelo.predict(X_fila) → pred_const = exp(pred_log) - 1
+  5. explainer.shap_values(X_fila) → array[33]
+  6. Seleccionar top N por |shap_val| → lista de ContribucionFeature
   7. Convertir a nominales con IPC
   8. Calcular intervalo de confianza (± MAPE%)
   9. Armar y retornar PrediccionVentaResponse
@@ -24,7 +23,7 @@ Flujo por request (< 50ms):
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import pandas as pd
@@ -45,7 +44,6 @@ if TYPE_CHECKING:
 
 
 # ─── Etiquetas legibles para las features ─────────────────────────────────────
-# Permite que el frontend muestre nombres amigables en lugar de nombres técnicos.
 
 _FEATURE_LABELS: dict[str, str] = {
     "Superficie":                  "Superficie ({v} m²)",
@@ -97,50 +95,54 @@ def _build_label(feature: str, valor: float, distrito: str) -> str:
         return template
 
 
-# ─── Función principal ────────────────────────────────────────────────────────
+# ─── Función genérica de predicción ──────────────────────────────────────────
 
-def predecir_venta(
+def _predecir_generico(
     req: PrediccionVentaRequest,
     state: "ModelState",
+    tipo: Literal["venta", "alquiler"],
 ) -> PrediccionVentaResponse:
-    """
-    Predice el precio de venta de un inmueble y retorna la explicabilidad SHAP.
+    """Ejecuta inferencia y cálculo SHAP para venta o alquiler."""
+    if tipo == "venta":
+        modelo = state.modelo
+        explainer = state.explainer
+        encoding_map = state.encoding_map
+        feature_cols = state.feature_cols
+        media_global = state.media_global
+        config = state.config
+    else:
+        modelo = state.modelo_alquiler
+        explainer = state.explainer_alquiler
+        encoding_map = state.encoding_map_alquiler
+        feature_cols = state.feature_cols_alquiler
+        media_global = state.media_global_alquiler
+        config = state.config_alquiler
 
-    Args:
-        req:   Request validado por Pydantic.
-        state: Singleton con modelo, explainer, encoding_map y data_provider.
+    if modelo is None or explainer is None:
+        raise HTTPException(
+            status_code=503,
+            detail=f"El modelo de {tipo} no está cargado en el servicio.",
+        )
 
-    Returns:
-        PrediccionVentaResponse con predicción + SHAP + metadata.
-
-    Raises:
-        HTTPException 422: Si el distrito no está disponible en el modelo.
-        HTTPException 500: Si ocurre un error inesperado durante la inferencia.
-    """
-
-    # ── 1. Validar distrito ───────────────────────────────────────────────────
-    if req.distrito not in state.encoding_map:
+    # 1. Validar distrito
+    if req.distrito not in encoding_map:
         raise HTTPException(
             status_code=422,
             detail={
                 "error": "distrito_no_disponible",
                 "message": (
-                    f"El distrito '{req.distrito}' no está disponible en el modelo actual. "
-                    f"El modelo cubre {len(state.encoding_map)} distritos de Lima Metropolitana."
+                    f"El distrito '{req.distrito}' no está disponible en el modelo de {tipo}. "
+                    f"El modelo cubre {len(encoding_map)} distritos de Lima Metropolitana."
                 ),
-                "distritos_disponibles": sorted(state.encoding_map.keys()),
-                "total_distritos": len(state.encoding_map),
-                "sugerencia": (
-                    "Usa GET /api/v1/distritos para ver la lista completa, "
-                    "o GET /api/v1/modelo/info para más detalles."
-                ),
+                "distritos_disponibles": sorted(encoding_map.keys()),
+                "total_distritos": len(encoding_map),
             },
         )
 
-    # ── 2. Contexto distrital ─────────────────────────────────────────────────
+    # 2. Contexto distrital desde PostgreSQL
     ctx = state.data_provider.get_distrito_context(req.distrito)  # type: ignore[union-attr]
 
-    # ── 3. Construir fila de features ─────────────────────────────────────────
+    # 3. Construir fila de features
     from datetime import datetime
     ahora = datetime.now()
     anio: int = req.anio if req.anio is not None else ahora.year
@@ -161,65 +163,63 @@ def predecir_venta(
         "Piso":                        float(req.piso),
         "Vista_Exterior":              1.0 if req.vista_exterior else 0.0,
         "Antiguedad":                  float(req.antiguedad),
-        # NSE y contexto distrital (del data_provider)
-        "pct_NSE_A":                   float(ctx.get("pct_NSE_A", 0)),
-        "pct_NSE_B":                   float(ctx.get("pct_NSE_B", 0)),
-        "pct_NSE_C":                   float(ctx.get("pct_NSE_C", 0)),
-        "pct_NSE_D":                   float(ctx.get("pct_NSE_D", 0)),
-        "pct_NSE_E":                   float(ctx.get("pct_NSE_E", 0)),
-        "tasa_robo":                   float(ctx.get("tasa_robo", 0)),
-        "tasa_hurto":                  float(ctx.get("tasa_hurto", 0)),
-        "poblacion_proyectada":        float(ctx.get("poblacion_proyectada", 0)),
+        # NSE y contexto distrital
+        "pct_NSE_A":                   float(ctx.get("pct_NSE_A") or 0),
+        "pct_NSE_B":                   float(ctx.get("pct_NSE_B") or 0),
+        "pct_NSE_C":                   float(ctx.get("pct_NSE_C") or 0),
+        "pct_NSE_D":                   float(ctx.get("pct_NSE_D") or 0),
+        "pct_NSE_E":                   float(ctx.get("pct_NSE_E") or 0),
+        "tasa_robo":                   float(ctx.get("tasa_robo") or 0),
+        "tasa_hurto":                  float(ctx.get("tasa_hurto") or 0),
+        "poblacion_proyectada":        float(ctx.get("poblacion_proyectada") or 0),
         "area_distrito_km2":           float(ctx.get("area_distrito_km2") or 0),
-        "distancia_centro_km":         float(ctx.get("distancia_centro_km", 0)),
-        "dist_colegio_km":             float(ctx.get("dist_colegio_km", 0)),
-        "dist_hospital_km":            float(ctx.get("dist_hospital_km", 0)),
-        "dist_estacion_transporte_km": float(ctx.get("dist_estacion_transporte_km", 0)),
-        "dist_centro_comercial_km":    float(ctx.get("dist_centro_comercial_km", 0)),
-        "dist_parque_km":              float(ctx.get("dist_parque_km", 0)),
-        "dist_universidad_km":         float(ctx.get("dist_universidad_km", 0)),
-        "densidad_hab_km2":            float(ctx.get("densidad_hab_km2", 0)),
-        # Features engineered (replicadas de 02_preprocesamiento.py)
+        "distancia_centro_km":         float(ctx.get("distancia_centro_km") or 0),
+        "dist_colegio_km":             float(ctx.get("dist_colegio_km") or 0),
+        "dist_hospital_km":            float(ctx.get("dist_hospital_km") or 0),
+        "dist_estacion_transporte_km": float(ctx.get("dist_estacion_transporte_km") or 0),
+        "dist_centro_comercial_km":    float(ctx.get("dist_centro_comercial_km") or 0),
+        "dist_parque_km":              float(ctx.get("dist_parque_km") or 0),
+        "dist_universidad_km":         float(ctx.get("dist_universidad_km") or 0),
+        "densidad_hab_km2":            float(ctx.get("densidad_hab_km2") or 0),
+        # Features engineered
         "periodo_numerico":            float(anio * 4 + trimestre),
         "m2_por_habitacion":           sup / (hab + 1),
         "ratio_banios_hab":            ban / (hab + 0.1),
         "tiene_garaje":                1.0 if gar > 0 else 0.0,
         "es_piso_alto":                1.0 if req.piso >= 8 else 0.0,
         "superficie_cuadrado":         (sup / 100) ** 2,
-        "distrito_encoded":            state.encoding_map[req.distrito],
+        "distrito_encoded":            encoding_map[req.distrito],
     }
 
-    X = pd.DataFrame([fila])[state.feature_cols]
+    X = pd.DataFrame([fila])[feature_cols]
 
-    # ── 4. Predicción (escala log → escala original) ──────────────────────────
+    # 4. Predicción (log1p -> escala original)
     try:
-        pred_log = state.modelo.predict(X)[0]  # type: ignore[union-attr]
-        pred_const = np.expm1(pred_log)         # Soles Constantes (Base Dic 2009)
+        pred_log = modelo.predict(X)[0]
+        pred_const = np.expm1(pred_log)
     except Exception as exc:
         raise HTTPException(
             status_code=500,
-            detail=f"Error durante la inferencia del modelo: {exc}",
+            detail=f"Error durante la inferencia de {tipo}: {exc}",
         ) from exc
 
-    # ── 5. SHAP values (escala log) ───────────────────────────────────────────
+    # 5. SHAP values
     try:
-        shap_vals_raw = state.explainer.shap_values(X)  # type: ignore[union-attr]
-        # shap_vals_raw puede ser array 2D (1, n_features) o 1D según versión SHAP
+        shap_vals_raw = explainer.shap_values(X)
         shap_arr: np.ndarray = (
             shap_vals_raw[0] if shap_vals_raw.ndim == 2 else shap_vals_raw
         )
     except Exception as exc:
         raise HTTPException(
             status_code=500,
-            detail=f"Error calculando SHAP values: {exc}",
+            detail=f"Error calculando SHAP values de {tipo}: {exc}",
         ) from exc
 
-    # ── 6. Top N contribuciones SHAP ─────────────────────────────────────────
-    n_top: int = state.config.get("shap_top_n", 10)
-    feature_names = state.feature_cols
+    # 6. Top N contribuciones SHAP
+    n_top: int = config.get("shap_top_n", 10)
+    feature_names = feature_cols
     fila_vals = X.iloc[0].to_dict()
 
-    # Ordenar por |shap_value| descendente
     indexed = sorted(
         enumerate(shap_arr),
         key=lambda t: abs(t[1]),
@@ -244,17 +244,17 @@ def predecir_venta(
             )
         )
 
-    # ── 7. Conversión a soles nominales ───────────────────────────────────────
-    ipc_cfg  = state.config["ipc_actual"]
-    ipc_val  = float(ipc_cfg["valor"])
+    # 7. Conversión a soles nominales
+    ipc_cfg = config.get("ipc_actual", {"valor": 169.18, "periodo": "2026-Q1"})
+    ipc_val = float(ipc_cfg["valor"])
     ipc_factor = ipc_val / 100.0
 
     pred_nominal    = pred_const * ipc_factor
-    pred_m2_const   = pred_const  / sup
+    pred_m2_const   = pred_const / sup
     pred_m2_nominal = pred_nominal / sup
 
-    # ── 8. Intervalo de confianza ─────────────────────────────────────────────
-    mape = float(state.config["mape_test"])
+    # 8. Intervalo de confianza (± MAPE)
+    mape = float(config.get("mape_test", 15.0))
     ic_factor = mape / 100.0
 
     ic_inf_const   = pred_const   * (1 - ic_factor)
@@ -262,11 +262,11 @@ def predecir_venta(
     ic_inf_nominal = pred_nominal * (1 - ic_factor)
     ic_sup_nominal = pred_nominal * (1 + ic_factor)
 
-    # ── 9. Valor base SHAP (media global del entrenamiento) ───────────────────
-    base_log   = float(state.explainer.expected_value)  # type: ignore[union-attr]
-    base_const = math.expm1(base_log) if not math.isnan(base_log) else state.media_global
+    # 9. Valor base SHAP
+    base_log = float(explainer.expected_value)
+    base_const = math.expm1(base_log) if not math.isnan(base_log) else media_global
 
-    # ── 10. Armar response ────────────────────────────────────────────────────
+    # 10. Armar response
     return PrediccionVentaResponse(
         distrito=req.distrito,
         superficie_m2=sup,
@@ -290,12 +290,28 @@ def predecir_venta(
             n_features_total=len(feature_names),
         ),
         modelo=InfoModelo(
-            version=state.config.get("modelo_version", "v2"),
+            version=config.get("modelo_version", "v1"),
             mape_test=mape,
-            r2_test=float(state.config.get("r2_test", 0.0)),
+            r2_test=float(config.get("r2_test", 0.0)),
             ipc_factor=ipc_val,
             periodo_ipc=ipc_cfg.get("periodo", "2026-Q1"),
-            train_periodo=state.config.get("train_periodo", "2016-2023"),
-            test_periodo=state.config.get("test_periodo", "2024-2025"),
+            train_periodo=config.get("train_periodo", "2016-2023"),
+            test_periodo=config.get("test_periodo", "2024-2025"),
         ),
     )
+
+
+def predecir_venta(
+    req: PrediccionVentaRequest,
+    state: "ModelState",
+) -> PrediccionVentaResponse:
+    """Predice el precio de venta de un inmueble."""
+    return _predecir_generico(req, state, tipo="venta")
+
+
+def predecir_alquiler(
+    req: PrediccionVentaRequest,
+    state: "ModelState",
+) -> PrediccionVentaResponse:
+    """Predice el precio de alquiler mensual de un inmueble."""
+    return _predecir_generico(req, state, tipo="alquiler")

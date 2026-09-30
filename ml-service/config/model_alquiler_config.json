@@ -1,0 +1,22 @@
+{
+  "modelo_version": "v1",
+  "modelo_archivo": "xgboost_alquiler_v1.pkl",
+  "tipo_operacion": "alquiler",
+  "mape_test": 13.85,
+  "r2_test": 0.6787,
+  "mae_test": 235.75,
+  "rmse_test": 359.65,
+  "train_periodo": "2016-2023",
+  "test_periodo": "2024-2025",
+  "ipc_actual": {
+    "valor": 169.18,
+    "periodo": "2026-Q1",
+    "fuente": "INEI/BCRP - serie PN01270PM, Base Dic 2009 = 100",
+    "nota": "Actualizar este valor al cierre de cada trimestre sin necesidad de redespliegue"
+  },
+  "n_features": 33,
+  "target": "Alquiler_Soles_Const",
+  "log_transform": true,
+  "shap_top_n": 10,
+  "n_distritos": 22
+}

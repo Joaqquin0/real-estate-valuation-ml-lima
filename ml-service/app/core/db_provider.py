@@ -63,6 +63,22 @@ class ITrainingDataProvider(ABC):
         ...
 
     @abstractmethod
+    def load_dataset_alquiler(
+        self,
+        split: Literal["TRAIN", "TEST", "ALL"] = "ALL",
+    ) -> pd.DataFrame:
+        """
+        Retorna el dataset de alquiler con el JOIN contextual aplicado.
+
+        Args:
+            split: 'TRAIN' (2016-2023), 'TEST' (2024-2025), 'ALL' (ambos).
+
+        Returns:
+            DataFrame con todas las columnas del JOIN para inmuebles en alquiler.
+        """
+        ...
+
+    @abstractmethod
     def check_connection(self) -> bool:
         """Verifica que la conexión a la fuente de datos esté activa."""
         ...
@@ -115,15 +131,59 @@ JOIN distrito_anio_contexto c
 ORDER BY v.anio ASC, v.trimestre ASC;
 """
 
+_QUERY_ALQUILER_TEMPLATE = """
+SELECT
+    a.id            AS inmueble_id,
+    a.anio,
+    a.trimestre,
+    d.nombre        AS distrito,
+    a.superficie_m2,
+    a.habitaciones,
+    a.banos,
+    a.garajes,
+    a.piso,
+    a.antiguedad_anios,
+    a.vista_exterior,
+    a.alquiler_soles_nominal,
+    a.alquiler_soles_const,
+    a.split_dataset,
+    -- Variables Contextuales Anuales (JOIN con distrito_anio_contexto)
+    c.pct_nse_a,
+    c.pct_nse_b,
+    c.pct_nse_c,
+    c.pct_nse_d,
+    c.pct_nse_e,
+    c.tasa_robo,
+    c.tasa_hurto,
+    c.poblacion_proyectada,
+    c.area_distrito_km2,
+    c.densidad_hab_km2,
+    c.distancia_centro_km,
+    c.dist_colegio_km,
+    c.dist_hospital_km,
+    c.dist_estacion_transporte_km,
+    c.dist_centro_comercial_km,
+    c.dist_parque_km,
+    c.dist_universidad_km
+FROM dataset_inmuebles_alquiler a
+JOIN distritos d
+    ON a.distrito_id = d.id
+JOIN distrito_anio_contexto c
+    ON a.distrito_id = c.distrito_id AND a.anio = c.anio
+{where_clause}
+ORDER BY a.anio ASC, a.trimestre ASC;
+"""
+
 
 class PostgreSQLTrainingProvider(ITrainingDataProvider):
     """
     Proveedor de datos de entrenamiento desde PostgreSQL (inmobiliaria_ml_db).
 
     Lee las tablas:
-      - dataset_inmuebles_venta  → características físicas + precio + split_dataset
-      - distritos                → nombre del distrito
-      - distrito_anio_contexto   → NSE, seguridad, demografía, distancias POI
+      - dataset_inmuebles_venta     → venta (características + precio_soles_const)
+      - dataset_inmuebles_alquiler  → alquiler (características + alquiler_soles_const)
+      - distritos                   → catálogo oficial de distritos
+      - distrito_anio_contexto      → NSE, seguridad, demografía, POIs
 
     No accede a: auditoria_flags_imputacion ni pipeline_ejecuciones
     (esas tablas son exclusivas del pipeline ETL, según la guía).
@@ -164,28 +224,8 @@ class PostgreSQLTrainingProvider(ITrainingDataProvider):
         except Exception:
             return False
 
-    def load_dataset_venta(
-        self,
-        split: Literal["TRAIN", "TEST", "ALL"] = "ALL",
-    ) -> pd.DataFrame:
-        """
-        Ejecuta el JOIN contextual y retorna un DataFrame limpio.
-
-        El split respeta la partición temporal definida en la DB:
-          - TRAIN: anios 2016-2023
-          - TEST:  anios 2024-2025
-          - ALL:   ambos (para análisis, no para entrenamiento directo)
-
-        Raises:
-            RuntimeError: Si la consulta falla o retorna 0 filas.
-        """
-        if split == "ALL":
-            where_clause = ""
-        else:
-            where_clause = f"WHERE v.split_dataset = '{split}'"
-
-        query = _QUERY_VENTA_TEMPLATE.format(where_clause=where_clause)
-
+    def _ejecutar_query(self, query: str, split: str, tipo: str) -> pd.DataFrame:
+        """Ejecuta una consulta SQL de extracción de dataset y normaliza tipos."""
         conn = self._get_connection()
         try:
             cur = conn.cursor()
@@ -198,7 +238,7 @@ class PostgreSQLTrainingProvider(ITrainingDataProvider):
 
         if df.empty:
             raise RuntimeError(
-                f"La consulta para split='{split}' no retornó filas. "
+                f"La consulta para {tipo} split='{split}' no retornó filas. "
                 "Verifica que la BD tenga datos cargados."
             )
 
@@ -210,7 +250,29 @@ class PostgreSQLTrainingProvider(ITrainingDataProvider):
             df["vista_exterior"] = df["vista_exterior"].astype(bool)
 
         print(
-            f"[PostgreSQLTrainingProvider] Cargados {len(df):,} registros "
+            f"[PostgreSQLTrainingProvider] Cargados {len(df):,} registros de {tipo} "
             f"(split={split}) desde '{self.conn_params['dbname']}'."
         )
         return df
+
+    def load_dataset_venta(
+        self,
+        split: Literal["TRAIN", "TEST", "ALL"] = "ALL",
+    ) -> pd.DataFrame:
+        """
+        Ejecuta el JOIN contextual para venta y retorna un DataFrame limpio.
+        """
+        where_clause = "" if split == "ALL" else f"WHERE v.split_dataset = '{split}'"
+        query = _QUERY_VENTA_TEMPLATE.format(where_clause=where_clause)
+        return self._ejecutar_query(query, split, "venta")
+
+    def load_dataset_alquiler(
+        self,
+        split: Literal["TRAIN", "TEST", "ALL"] = "ALL",
+    ) -> pd.DataFrame:
+        """
+        Ejecuta el JOIN contextual para alquiler y retorna un DataFrame limpio.
+        """
+        where_clause = "" if split == "ALL" else f"WHERE a.split_dataset = '{split}'"
+        query = _QUERY_ALQUILER_TEMPLATE.format(where_clause=where_clause)
+        return self._ejecutar_query(query, split, "alquiler")

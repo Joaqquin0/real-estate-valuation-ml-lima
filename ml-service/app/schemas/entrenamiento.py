@@ -1,21 +1,26 @@
 """
 app/schemas/entrenamiento.py
 ────────────────────────────
-Contratos Pydantic para el endpoint de reentrenamiento administrativo.
+Contratos Pydantic para los endpoints de reentrenamiento administrativo.
 
 POST /api/v1/admin/entrenamiento/venta
-  → Lanza un job de entrenamiento en background
-  → Devuelve inmediatamente un job_id para consultar estado
+  → Lanza un job de entrenamiento para venta en background
+
+POST /api/v1/admin/entrenamiento/alquiler
+  → Lanza un job de entrenamiento para alquiler en background
 
 GET /api/v1/admin/entrenamiento/estado/{job_id}
   → Retorna el estado actual del job de entrenamiento
+
+GET /api/v1/admin/entrenamiento/jobs
+  → Lista todos los jobs ejecutados
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -29,28 +34,22 @@ class EstadoJob(str, Enum):
     FALLIDO     = "fallido"
 
 
-# ─── REQUEST ──────────────────────────────────────────────────────────────────
+class TipoOperacion(str, Enum):
+    VENTA    = "venta"
+    ALQUILER = "alquiler"
 
-class EntrenamientoVentaRequest(BaseModel):
-    """
-    Parámetros opcionales para el job de reentrenamiento.
 
-    Si se omiten, se usan los hiperparámetros del modelo actual
-    registrados en config/model_config.json.
-    """
-    nombre_modelo: str = Field(
-        default="xgboost_venta_v2",
-        description="Nombre base del artefacto a generar (sin extensión). "
-                    "Ejemplo: 'xgboost_venta_v3'.",
-        examples=["xgboost_venta_v2"],
+# ─── REQUESTS ─────────────────────────────────────────────────────────────────
+
+class EntrenamientoBaseRequest(BaseModel):
+    """Parámetros base para el job de reentrenamiento."""
+    nombre_modelo: str | None = Field(
+        default=None,
+        description="Nombre base del artefacto a generar (sin extensión).",
     )
     hiperparametros: dict[str, Any] | None = Field(
         default=None,
-        description=(
-            "Hiperparámetros del XGBRegressor. Si se omite, se usan los actuales "
-            "de model_config.json. "
-            "Ejemplo: {\"n_estimators\": 500, \"max_depth\": 6, \"learning_rate\": 0.05}"
-        ),
+        description="Hiperparámetros del XGBRegressor. Si se omite, se usan los parámetros óptimos por defecto.",
         examples=[None],
     )
     shap_top_n: int = Field(
@@ -59,13 +58,23 @@ class EntrenamientoVentaRequest(BaseModel):
         description="Número de contribuciones SHAP a incluir en la respuesta de inferencia.",
     )
 
-    model_config = {"json_schema_extra": {
-        "example": {
-            "nombre_modelo": "xgboost_venta_v2",
-            "hiperparametros": None,
-            "shap_top_n": 10,
-        }
-    }}
+
+class EntrenamientoVentaRequest(EntrenamientoBaseRequest):
+    """Parámetros para reentrenar el modelo de venta."""
+    nombre_modelo: str = Field(
+        default="xgboost_venta_v2",
+        description="Nombre base del artefacto a generar (ej: 'xgboost_venta_v3').",
+        examples=["xgboost_venta_v2"],
+    )
+
+
+class EntrenamientoAlquilerRequest(EntrenamientoBaseRequest):
+    """Parámetros para reentrenar el modelo de alquiler."""
+    nombre_modelo: str = Field(
+        default="xgboost_alquiler_v1",
+        description="Nombre base del artefacto a generar (ej: 'xgboost_alquiler_v2').",
+        examples=["xgboost_alquiler_v1"],
+    )
 
 
 # ─── RESPONSE — Job iniciado ──────────────────────────────────────────────────
@@ -74,6 +83,10 @@ class EntrenamientoIniciadoResponse(BaseModel):
     """Respuesta inmediata al iniciar un job de reentrenamiento (HTTP 202)."""
     job_id: str = Field(
         description="Identificador único del job. Usar para consultar estado."
+    )
+    tipo_operacion: str = Field(
+        default="venta",
+        description="Tipo de modelo que se está entrenando ('venta' o 'alquiler')."
     )
     estado: EstadoJob = Field(
         default=EstadoJob.PENDIENTE,
@@ -99,50 +112,39 @@ class MetricasEntrenamiento(BaseModel):
     """Métricas calculadas sobre el test set tras el reentrenamiento."""
     mae: float | None = Field(default=None, description="Error Absoluto Medio (Soles Constantes).")
     rmse: float | None = Field(default=None, description="Raíz del Error Cuadrático Medio.")
-    mape_pct: float | None = Field(default=None, description="MAPE en % sobre el test set 2024-2025.")
-    r2: float | None = Field(default=None, description="Coeficiente de determinación R².")
-    n_train: int | None = Field(default=None, description="Filas usadas en entrenamiento (TRAIN split).")
-    n_test: int | None = Field(default=None, description="Filas usadas en evaluación (TEST split).")
+    mape_pct: float | None = Field(default=None, description="MAPE en el test set (porcentaje).")
+    r2: float | None = Field(default=None, description="Coeficiente de Determinación R².")
+    n_train: int | None = Field(default=None, description="Registros usados en entrenamiento.")
+    n_test: int | None = Field(default=None, description="Registros usados en evaluación test.")
     supera_benchmark: bool | None = Field(
         default=None,
-        description="True si MAPE < 15% (benchmark referencial de la tesis Oporto et al., 2024).",
+        description="True si el MAPE es menor al benchmark (15.0% para venta, 17.89% para alquiler).",
     )
 
 
 class ArtifactosGenerados(BaseModel):
-    """Artefactos producidos y actualizados tras el reentrenamiento exitoso."""
-    modelo_pkl: str = Field(description="Ruta relativa del modelo serializado.")
-    params_json: str = Field(description="Ruta relativa de los hiperparámetros.")
-    metricas_json: str = Field(description="Ruta relativa de las métricas oficiales.")
-    model_config_json: str = Field(description="Ruta relativa de la config del servicio (actualizada).")
-    modelo_recargado_en_memoria: bool = Field(
-        description="True si el modelo en memoria del servicio fue reemplazado sin restart."
-    )
-
+    """Rutas relativas a los artefactos generados por el pipeline."""
     model_config = {"protected_namespaces": ()}
 
+    modelo_pkl: str = Field(description="Ruta al modelo XGBoost serializado.")
+    params_json: str = Field(description="Ruta al archivo con hiperparámetros usados.")
+    metricas_json: str = Field(description="Ruta a las métricas oficiales calculadas.")
+    model_config_json: str = Field(description="Ruta a la config del servicio actualizada.")
+    modelo_recargado_en_memoria: bool = Field(
+        description="True si el modelo fue cargado automáticamente en la app (hot-reload)."
+    )
 
 
 class EstadoEntrenamientoResponse(BaseModel):
-    """Estado detallado de un job de reentrenamiento."""
+    """Respuesta completa del estado de un job de reentrenamiento."""
     job_id: str
+    tipo_operacion: str = "venta"
     estado: EstadoJob
     nombre_modelo: str
     iniciado_en: datetime
-    completado_en: datetime | None = Field(default=None)
-    duracion_segundos: float | None = Field(default=None)
-    progreso: str = Field(
-        description="Descripción textual del paso actual del pipeline de entrenamiento."
-    )
-    metricas: MetricasEntrenamiento | None = Field(
-        default=None,
-        description="Métricas del modelo. Solo disponibles cuando estado='completado'.",
-    )
-    artefactos: ArtifactosGenerados | None = Field(
-        default=None,
-        description="Artefactos generados. Solo disponibles cuando estado='completado'.",
-    )
-    error: str | None = Field(
-        default=None,
-        description="Mensaje de error detallado. Solo presente cuando estado='fallido'.",
-    )
+    completado_en: datetime | None = None
+    duracion_segundos: float | None = None
+    progreso: str = Field(default="", description="Paso actual del pipeline.")
+    metricas: MetricasEntrenamiento | None = None
+    artefactos: ArtifactosGenerados | None = None
+    error: str | None = None

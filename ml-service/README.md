@@ -57,10 +57,20 @@ Parámetros clave en `.env`:
 | Variable | Default | Descripción |
 |----------|---------|-------------|
 | `MODEL_PATH` | `models/xgboost_venta_v2.pkl` | Ruta al modelo serializado |
-| `METADATA_PATH` | `data/features_metadata.json` | Features y encoding del modelo |
-| `CONTEXT_CSV_PATH` | `data/distrito_contexto_ref.csv` | Contexto distrital (Fase 1) |
-| `DATA_PROVIDER` | `csv` | `csv` (Fase 1) o `mongo` (Fase 2) |
-| `ALLOWED_ORIGINS` | `*` | Orígenes CORS permitidos |
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `MODEL_PATH` | `models/xgboost_venta_v2.pkl` | Ruta al modelo de venta |
+| `METADATA_PATH` | `data/features_metadata.json` | Metadata y encoding de venta |
+| `CONFIG_PATH` | `config/model_config.json` | Configuración oficial de venta |
+| `MODEL_ALQUILER_PATH` | `models/xgboost_alquiler_v1.pkl` | Ruta al modelo de alquiler |
+| `METADATA_ALQUILER_PATH` | `data/features_metadata_alquiler.json` | Metadata y encoding de alquiler |
+| `CONFIG_ALQUILER_PATH` | `config/model_alquiler_config.json` | Configuración oficial de alquiler |
+| `DB_HOST` | `localhost` | Host de PostgreSQL (`inmobiliaria_ml_db`) |
+| `DB_PORT` | `5432` | Puerto de PostgreSQL |
+| `DB_NAME` | `inmobiliaria_ml_db` | Base de datos |
+| `DB_USER` | `postgres` | Usuario |
+| `DB_PASSWORD` | `...` | Contraseña |
+| `ADMIN_TOKEN` | (opcional) | Token para endpoints `/admin/entrenamiento/*` |
 
 ## Arrancar el servidor
 
@@ -68,51 +78,29 @@ Parámetros clave en `.env`:
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-El startup log esperado:
-```
-═══════════════════════════════════════════════════════
-  ML Service — Tasación Inmobiliaria Lima
-  Iniciando carga de artefactos ...
-═══════════════════════════════════════════════════════
-[ModelLoader] Cargando modelo: models/xgboost_venta_v2.pkl ...
-[ModelLoader] ✓ Modelo cargado (1.5 MB)
-[ModelLoader] Inicializando SHAP TreeExplainer ...
-[ModelLoader] ✓ SHAP TreeExplainer listo
-[ModelLoader] ✓ Metadata: 33 features, 22 distritos
-[ModelLoader] ✓ Config: versión=v2, IPC=169.18 (2026-Q1)
-[CSVContextProvider] Cargado: 22 distritos desde distrito_contexto_ref.csv
-[ModelLoader] ✓ Data provider: CSV
-[ModelLoader] ═══════ Servicio ML listo ═══════
-═══════════════════════════════════════════════════════
-  Servicio listo. Accede a /docs para la API.
-═══════════════════════════════════════════════════════
-```
-
 Documentación interactiva: http://localhost:8000/docs
 
 ---
 
-## Endpoints
+## Endpoints Principales
 
-### `GET /health`
-Health check para load balancers.
-```json
-{"status": "ok", "modelo": "v2", "ipc_periodo": "2026-Q1"}
-```
+### 1. Inferencia
+- **`POST /api/v1/prediccion/venta`**: Predice precio de venta de un inmueble (soles constantes y nominales, intervalo de confianza ±15.04%, explicabilidad SHAP).
+- **`POST /api/v1/prediccion/alquiler`**: Predice canon de arrendamiento mensual (soles constantes y nominales, intervalo de confianza ±13.85%, explicabilidad SHAP).
+- **`GET /api/v1/distritos`**: Lista los 22 distritos disponibles de Lima Metropolitana.
+- **`GET /health`**: Health check para balanceadores.
 
-### `GET /api/v1/distritos`
-Lista de distritos disponibles.
-```json
-{"distritos": ["Ate Vitarte", "Barranco", "..."], "total": 22}
-```
+### 2. Administración y Reentrenamiento
+- **`POST /api/v1/admin/entrenamiento/venta`**: Lanza pipeline de reentrenamiento del modelo de venta consumiendo `dataset_inmuebles_venta` desde PostgreSQL.
+- **`POST /api/v1/admin/entrenamiento/alquiler`**: Lanza pipeline de reentrenamiento del modelo de alquiler consumiendo `dataset_inmuebles_alquiler` desde PostgreSQL con ponderación temporal E1.
+- **`GET /api/v1/admin/entrenamiento/estado/{job_id}`**: Consulta progreso en tiempo real de un job (1/8 a 8/8) y métricas obtenidas.
+- **`GET /api/v1/admin/entrenamiento/jobs`**: Historial de jobs ejecutados en la sesión.
 
-### `GET /api/v1/modelo/info`
-Metadata completa del modelo activo (versión, métricas, IPC, distritos).
+---
 
-### `POST /api/v1/prediccion/venta`
-Predice el precio de venta de un inmueble.
+### Ejemplo de Predicción de Venta / Alquiler
 
-**Request:**
+**Request (`POST /api/v1/prediccion/venta` o `/api/v1/prediccion/alquiler`):**
 ```json
 {
   "distrito": "San Miguel",
@@ -125,7 +113,7 @@ Predice el precio de venta de un inmueble.
   "vista_exterior": true
 }
 ```
-> **Nota:** `anio` y `trimestre` son opcionales. Si se omiten, el servicio los calcula automáticamente según la fecha actual del sistema.
+> **Nota:** `anio` y `trimestre` son opcionales. Si se omiten, el backend los calcula automáticamente con la fecha del sistema.
 
 **Response (200):**
 ```json

@@ -1,7 +1,7 @@
 """
 app/services/entrenamiento_service.py
 ───────────────────────────────────────
-Pipeline de reentrenamiento del modelo XGBoost de venta, ejecutado
+Pipeline de reentrenamiento de modelos XGBoost (Venta y Alquiler), ejecutado
 bajo petición del administrador del sistema.
 
 Flujo completo del pipeline (se ejecuta en un thread de background):
@@ -9,14 +9,17 @@ Flujo completo del pipeline (se ejecuta en un thread de background):
   2. Construir features con la misma lógica que prediccion_service.py
      (Training-Serving Parity — ver GUIA_ENTRENAMIENTO_ML_DESDE_POSTGRES.md §D)
   3. Target encoding del distrito calculado SOLO sobre TRAIN (sin data leakage)
-  4. Transformación logarítmica del target: y = log1p(precio_soles_const)
+  4. Transformación logarítmica del target:
+       - Venta:    y = log1p(precio_soles_const)
+       - Alquiler: y = log1p(alquiler_soles_const) (con ponderación temporal E1)
   5. Entrenamiento del XGBRegressor con los hiperparámetros indicados
   6. Evaluación de métricas sobre el TEST set (2024-2025)
   7. Exportar artefactos:
        - models/{nombre}.pkl
        - models/{nombre}_params.json
        - models/{nombre}_metricas.json
-       - config/model_config.json (actualizado con nuevas métricas y encoding_map)
+       - config/model_config.json o config/model_alquiler_config.json
+       - data/features_metadata.json o data/features_metadata_alquiler.json
   8. Recargar el modelo en memoria del servicio (hot-reload sin restart)
 
 Restricciones:
@@ -34,7 +37,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 import joblib
 import numpy as np
@@ -56,9 +59,6 @@ if TYPE_CHECKING:
 
 
 # ─── Registry de jobs en memoria ─────────────────────────────────────────────
-# Diccionario que mapea job_id → estado del job.
-# En una arquitectura distribuida esto debería ser Redis, pero para el caso
-# de un solo servidor es suficiente en memoria.
 
 _job_registry: dict[str, dict[str, Any]] = {}
 _job_lock = threading.Lock()
@@ -105,16 +105,7 @@ def _update_job(job_id: str, **kwargs: Any) -> None:
 
 def _construir_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Construye el conjunto de features con idéntica lógica a prediccion_service.py.
-
-    IMPORTANTE: cualquier cambio aquí debe replicarse en prediccion_service.py
-    para mantener Training-Serving Parity (ver Guía §D).
-
-    Args:
-        df: DataFrame con columnas crudas del JOIN de PostgreSQL.
-
-    Returns:
-        DataFrame con las features engineered listas para el modelo.
+    Construye el conjunto de 33 features con idéntica lógica a prediccion_service.py.
     """
     df = df.copy()
 
@@ -154,17 +145,11 @@ def _target_encoding_distrito(
     df_train: pd.DataFrame,
     df_test: pd.DataFrame,
     col_distrito: str = "distrito",
-    col_target: str = "Precio_Soles_Const",
+    col_target: str = "target_val",
     smoothing: float = 10.0,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float], float]:
     """
-    Target Encoding suavizado del distrito.
-
-    Calculado SOLO sobre df_train para evitar data leakage temporal.
-    Los distritos no vistos en train reciben la media global.
-
-    Returns:
-        (df_train, df_test, encoding_map, media_global)
+    Target Encoding Bayesiano (m-estimate) calculado ÚNICAMENTE sobre TRAIN.
     """
     media_global = float(df_train[col_target].mean())
 
@@ -213,39 +198,64 @@ def _calcular_metricas(
 
 def _run_training_pipeline(
     job_id: str,
+    tipo_operacion: Literal["venta", "alquiler"],
     nombre_modelo: str,
     hiperparametros: dict[str, Any] | None,
     shap_top_n: int,
     state: "ModelState",
 ) -> None:
     """
-    Pipeline completo de reentrenamiento. Ejecutado en un thread secundario.
-
-    Actualiza el registry de jobs en cada paso para que el endpoint de estado
-    pueda reportar el progreso en tiempo real.
+    Pipeline completo de reentrenamiento para Venta o Alquiler.
     """
     inicio = time.time()
 
-    # Hiperparámetros por defecto del modelo actual
-    DEFAULT_PARAMS: dict[str, Any] = {
-        "n_estimators":     500,
-        "max_depth":        6,
-        "learning_rate":    0.05,
-        "subsample":        0.8,
-        "colsample_bytree": 0.8,
-        "reg_alpha":        0.1,
-        "reg_lambda":       1.0,
-        "min_child_weight": 3,
-        "random_state":     42,
-        "n_jobs":          -1,
-        "tree_method":     "hist",
-    }
+    # Hiperparámetros por defecto según tipo de operación
+    if tipo_operacion == "venta":
+        DEFAULT_PARAMS: dict[str, Any] = {
+            "n_estimators":     500,
+            "max_depth":        6,
+            "learning_rate":    0.05,
+            "subsample":        0.8,
+            "colsample_bytree": 0.8,
+            "reg_alpha":        0.1,
+            "reg_lambda":       1.0,
+            "min_child_weight": 3,
+            "random_state":     42,
+            "n_jobs":          -1,
+            "tree_method":     "hist",
+        }
+        benchmark_mape = 15.0
+        config_path = os.getenv("CONFIG_PATH", "config/model_config.json")
+        metadata_path = os.getenv("METADATA_PATH", "data/features_metadata.json")
+        target_raw_col = "precio_soles_const"
+        target_df_col = "Precio_Soles_Const"
+    else:
+        # Alquiler — configuración validada en 03_entrenamiento_alquiler.py
+        DEFAULT_PARAMS = {
+            "n_estimators":     600,
+            "max_depth":        7,
+            "learning_rate":    0.04,
+            "subsample":        0.85,
+            "colsample_bytree": 0.80,
+            "reg_alpha":        0.1,
+            "reg_lambda":       4.0,
+            "min_child_weight": 3,
+            "random_state":     42,
+            "n_jobs":          -1,
+            "tree_method":     "hist",
+        }
+        benchmark_mape = 17.89  # Oporto et al. (2024)
+        config_path = os.getenv("CONFIG_ALQUILER_PATH", "config/model_alquiler_config.json")
+        metadata_path = os.getenv("METADATA_ALQUILER_PATH", "data/features_metadata_alquiler.json")
+        target_raw_col = "alquiler_soles_const"
+        target_df_col = "Alquiler_Soles_Const"
+
     params = hiperparametros or DEFAULT_PARAMS
 
     try:
         # ── Paso 1: Conectar a DB y cargar datos ──────────────────────────────
-        _update_job(job_id, progreso="[1/8] Conectando a PostgreSQL y cargando datos...")
-        print(f"[EntrenamientoService][{job_id}] Paso 1: Cargando datos de PostgreSQL...")
+        _update_job(job_id, progreso=f"[1/8] Conectando a PostgreSQL y cargando datos de {tipo_operacion}...")
+        print(f"[EntrenamientoService][{job_id}] Paso 1: Cargando datos de {tipo_operacion} desde PostgreSQL...")
 
         from app.core.db_provider import PostgreSQLTrainingProvider
         db_provider = PostgreSQLTrainingProvider()
@@ -256,8 +266,12 @@ def _run_training_pipeline(
                 "Verifica DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD en .env"
             )
 
-        df_train_raw = db_provider.load_dataset_venta(split="TRAIN")
-        df_test_raw  = db_provider.load_dataset_venta(split="TEST")
+        if tipo_operacion == "venta":
+            df_train_raw = db_provider.load_dataset_venta(split="TRAIN")
+            df_test_raw  = db_provider.load_dataset_venta(split="TEST")
+        else:
+            df_train_raw = db_provider.load_dataset_alquiler(split="TRAIN")
+            df_test_raw  = db_provider.load_dataset_alquiler(split="TEST")
 
         _update_job(
             job_id,
@@ -272,17 +286,16 @@ def _run_training_pipeline(
         df_test  = _construir_features(df_test_raw)
 
         # ── Paso 3: Target Encoding del distrito ──────────────────────────────
-        _update_job(job_id, progreso="[3/8] Aplicando Target Encoding del distrito...")
+        _update_job(job_id, progreso=f"[3/8] Aplicando Target Encoding ({target_df_col})...")
         print(f"[EntrenamientoService][{job_id}] Paso 3: Target Encoding...")
 
-        # Target en escala original para calcular el encoding
-        df_train["Precio_Soles_Const"] = df_train_raw["precio_soles_const"]
-        df_test["Precio_Soles_Const"]  = df_test_raw["precio_soles_const"]
+        df_train[target_df_col] = df_train_raw[target_raw_col]
+        df_test[target_df_col]  = df_test_raw[target_raw_col]
 
         df_train, df_test, encoding_map, media_global = _target_encoding_distrito(
             df_train, df_test,
             col_distrito="distrito",
-            col_target="Precio_Soles_Const",
+            col_target=target_df_col,
         )
 
         # ── Paso 4: Preparar X e y ────────────────────────────────────────────
@@ -302,28 +315,34 @@ def _run_training_pipeline(
             "distrito_encoded",
         ]
 
-        # Verificar que todas las features existen
         missing = [c for c in FEATURE_COLS if c not in df_train.columns]
         if missing:
             raise ValueError(
-                f"Faltan columnas en el dataset de entrenamiento: {missing}. "
-                "Revisa el JOIN en db_provider.py o la guía de entrenamiento."
+                f"Faltan columnas en el dataset de {tipo_operacion}: {missing}."
             )
 
         X_train = df_train[FEATURE_COLS].astype(float)
         X_test  = df_test[FEATURE_COLS].astype(float)
 
-        # Transformación logarítmica del target (Soles Constantes)
-        y_train = np.log1p(df_train["Precio_Soles_Const"].astype(float).values)
-        y_test  = np.log1p(df_test["Precio_Soles_Const"].astype(float).values)
+        y_train = np.log1p(df_train[target_df_col].astype(float).values)
+        y_test  = np.log1p(df_test[target_df_col].astype(float).values)
+
+        # Ponderación temporal E1 para alquiler (da mayor peso a transacciones recientes)
+        if tipo_operacion == "alquiler":
+            decay = 0.85
+            anio_ref = 2023
+            sample_weights = df_train["Anio"].apply(lambda y: decay ** (anio_ref - y) if y <= anio_ref else 1.0).values
+        else:
+            sample_weights = None
 
         # ── Paso 5: Entrenamiento XGBoost ─────────────────────────────────────
-        _update_job(job_id, progreso=f"[5/8] Entrenando XGBRegressor (params: n_estimators={params.get('n_estimators', '?')})...")
+        _update_job(job_id, progreso=f"[5/8] Entrenando XGBRegressor ({tipo_operacion}, n_estimators={params.get('n_estimators', '?')})...")
         print(f"[EntrenamientoService][{job_id}] Paso 5: Entrenando modelo...")
 
         modelo = XGBRegressor(**params)
         modelo.fit(
             X_train, y_train,
+            sample_weight=sample_weights,
             eval_set=[(X_test, y_test)],
             verbose=False,
         )
@@ -336,10 +355,10 @@ def _run_training_pipeline(
         metricas_dict = _calcular_metricas(y_test, y_pred_test)
         metricas_dict["n_train"] = len(X_train)
         metricas_dict["n_test"]  = len(X_test)
-        metricas_dict["supera_benchmark"] = metricas_dict["mape_pct"] < 15.0
+        metricas_dict["supera_benchmark"] = metricas_dict["mape_pct"] < benchmark_mape
 
         print(
-            f"[EntrenamientoService][{job_id}] Metricas: "
+            f"[EntrenamientoService][{job_id}] Metricas ({tipo_operacion}): "
             f"MAPE={metricas_dict['mape_pct']:.2f}% | R2={metricas_dict['r2']:.4f}"
         )
 
@@ -348,8 +367,9 @@ def _run_training_pipeline(
         print(f"[EntrenamientoService][{job_id}] Paso 7: Guardando artefactos...")
 
         models_dir = os.getenv("MODELS_DIR", "models")
-        config_path = os.getenv("CONFIG_PATH", "config/model_config.json")
         os.makedirs(models_dir, exist_ok=True)
+        os.makedirs("config", exist_ok=True)
+        os.makedirs("data", exist_ok=True)
 
         # 7a. Modelo serializado
         pkl_path = os.path.join(models_dir, f"{nombre_modelo}.pkl")
@@ -365,8 +385,7 @@ def _run_training_pipeline(
         with open(metricas_path, "w", encoding="utf-8") as f:
             json.dump(metricas_dict, f, indent=2)
 
-        # 7d. Actualizar config del servicio (model_config.json)
-        # Lee la config actual y actualiza solo los campos relevantes
+        # 7d. Actualizar config del modelo
         if os.path.exists(config_path):
             with open(config_path, encoding="utf-8") as f:
                 config_actual = json.load(f)
@@ -374,15 +393,13 @@ def _run_training_pipeline(
             config_actual = {}
 
         now_utc = datetime.now(timezone.utc)
-        quarter = (now_utc.month - 1) // 3 + 1
-        ahora_str = f"{now_utc.year}-Q{quarter}"
-        # Extraer versión del nombre
-        version = nombre_modelo.split("_")[-1] if "_" in nombre_modelo else "v2"
+        version = nombre_modelo.split("_")[-1] if "_" in nombre_modelo else ("v2" if tipo_operacion == "venta" else "v1")
 
         config_actualizada = {
             **config_actual,
             "modelo_version":  version,
             "modelo_archivo":  f"{nombre_modelo}.pkl",
+            "tipo_operacion":  tipo_operacion,
             "mape_test":       round(metricas_dict["mape_pct"], 4),
             "r2_test":         round(metricas_dict["r2"], 4),
             "mae_test":        round(metricas_dict["mae"], 2),
@@ -401,13 +418,12 @@ def _run_training_pipeline(
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(config_actualizada, f, indent=2, ensure_ascii=False)
 
-        # 7e. Actualizar features_metadata.json
-        metadata_path = os.getenv("METADATA_PATH", "data/features_metadata.json")
+        # 7e. Actualizar features_metadata
         metadata_actualizada = {
+            "target": target_df_col,
             "features": FEATURE_COLS,
             "encoding_map_distrito": encoding_map,
             "media_global_target": media_global,
-            "target": "Precio_Soles_Const",
             "transformacion": "log1p",
             "updated_at": now_utc.isoformat(),
         }
@@ -415,11 +431,11 @@ def _run_training_pipeline(
             json.dump(metadata_actualizada, f, indent=2, ensure_ascii=False)
 
         # ── Paso 8: Hot-reload del modelo en memoria ──────────────────────────
-        _update_job(job_id, progreso="[8/8] Recargando modelo en memoria del servicio (hot-reload)...")
-        print(f"[EntrenamientoService][{job_id}] Paso 8: Hot-reload en memoria...")
+        _update_job(job_id, progreso=f"[8/8] Recargando modelo de {tipo_operacion} en memoria...")
+        print(f"[EntrenamientoService][{job_id}] Paso 8: Hot-reload de {tipo_operacion}...")
 
         from app.core.model_loader import cargar_modelo
-        cargar_modelo(state, model_path_override=pkl_path)
+        cargar_modelo(state, tipo=tipo_operacion, model_path_override=pkl_path)
 
         duracion = round(time.time() - inicio, 2)
 
@@ -435,7 +451,7 @@ def _run_training_pipeline(
         _update_job(
             job_id,
             estado=EstadoJob.COMPLETADO,
-            progreso="[8/8] Entrenamiento completado exitosamente.",
+            progreso=f"[8/8] Entrenamiento de {tipo_operacion} completado exitosamente.",
             completado_en=datetime.now(timezone.utc),
             duracion_segundos=duracion,
             metricas=metricas_obj,
@@ -462,22 +478,17 @@ def _run_training_pipeline(
         _training_semaphore.release()
 
 
-# ─── Función pública: iniciar job ─────────────────────────────────────────────
+# ─── Funciones públicas: iniciar job ──────────────────────────────────────────
 
-def iniciar_entrenamiento_venta(
+def iniciar_entrenamiento(
+    tipo_operacion: Literal["venta", "alquiler"],
     nombre_modelo: str,
     hiperparametros: dict[str, Any] | None,
     shap_top_n: int,
     state: "ModelState",
 ) -> str:
     """
-    Registra y lanza el job de reentrenamiento en un thread de background.
-
-    Returns:
-        job_id: Identificador único del job iniciado.
-
-    Raises:
-        HTTPException 409: Si ya hay un job de entrenamiento en curso.
+    Registra y lanza un job de reentrenamiento (venta o alquiler) en background.
     """
     if not _training_semaphore.acquire(blocking=False):
         raise HTTPException(
@@ -497,12 +508,13 @@ def iniciar_entrenamiento_venta(
     with _job_lock:
         _job_registry[job_id] = {
             "job_id":             job_id,
+            "tipo_operacion":     tipo_operacion,
             "estado":             EstadoJob.EN_PROGRESO,
             "nombre_modelo":      nombre_modelo,
             "iniciado_en":        now,
             "completado_en":      None,
             "duracion_segundos":  None,
-            "progreso":           "[0/8] Iniciando pipeline de entrenamiento...",
+            "progreso":           f"[0/8] Iniciando pipeline de entrenamiento ({tipo_operacion})...",
             "metricas":           None,
             "artefactos":         None,
             "error":              None,
@@ -510,11 +522,29 @@ def iniciar_entrenamiento_venta(
 
     thread = threading.Thread(
         target=_run_training_pipeline,
-        args=(job_id, nombre_modelo, hiperparametros, shap_top_n, state),
+        args=(job_id, tipo_operacion, nombre_modelo, hiperparametros, shap_top_n, state),
         daemon=True,
-        name=f"entrenamiento-{job_id[:8]}",
+        name=f"entrenamiento-{tipo_operacion}-{job_id[:8]}",
     )
     thread.start()
 
-    print(f"[EntrenamientoService] Job {job_id} iniciado en thread '{thread.name}'.")
+    print(f"[EntrenamientoService] Job {job_id} ({tipo_operacion}) iniciado en thread '{thread.name}'.")
     return job_id
+
+
+def iniciar_entrenamiento_venta(
+    nombre_modelo: str = "xgboost_venta_v2",
+    hiperparametros: dict[str, Any] | None = None,
+    shap_top_n: int = 10,
+    state: "ModelState" | None = None,
+) -> str:
+    return iniciar_entrenamiento("venta", nombre_modelo, hiperparametros, shap_top_n, state)  # type: ignore[arg-type]
+
+
+def iniciar_entrenamiento_alquiler(
+    nombre_modelo: str = "xgboost_alquiler_v1",
+    hiperparametros: dict[str, Any] | None = None,
+    shap_top_n: int = 10,
+    state: "ModelState" | None = None,
+) -> str:
+    return iniciar_entrenamiento("alquiler", nombre_modelo, hiperparametros, shap_top_n, state)  # type: ignore[arg-type]
