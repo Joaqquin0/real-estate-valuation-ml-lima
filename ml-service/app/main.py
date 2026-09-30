@@ -39,6 +39,7 @@ from app.routers import health as health_router
 from app.routers import prediccion as prediccion_router
 
 
+
 # ─── Lifespan ─────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
@@ -78,16 +79,15 @@ app = FastAPI(
         "- Intervalo de confianza ± MAPE sobre el precio predicho\n"
         "- **Valores SHAP** por predicción: top 10 variables por impacto\n"
         "- 22 distritos de Lima Metropolitana disponibles\n\n"
-        "### Arquitectura\n"
-        "Este servicio **no persiste datos**. Recibe y devuelve JSON. "
-        "El almacenamiento y presentación al usuario final es responsabilidad "
-        "del módulo de precios (módulo externo).\n\n"
+        "### Fuente de datos\n"
+        "Fuente única: **PostgreSQL** (`inmobiliaria_ml_db`).\n"
+        "- Inferencia: contexto distrital precargado al startup desde `distrito_anio_contexto`.\n"
+        "- Reentrenamiento: dataset histórico vía JOIN contextual.\n\n"
         "### Administración\n"
         "- `POST /api/v1/admin/entrenamiento/venta` — Reentrenamiento desde PostgreSQL (requiere `X-Admin-Token`)\n"
         "- `GET /api/v1/admin/entrenamiento/estado/{job_id}` — Progreso del job\n\n"
         "### Roadmap\n"
-        "- **Fase 2**: Migración de datos contextuales a MongoDB (sin cambios en endpoints)\n"
-        "- **Fase 3**: Endpoint `POST /api/v1/prediccion/alquiler` con modelo de alquiler\n"
+        "- Endpoint `POST /api/v1/prediccion/alquiler` con modelo de alquiler\n"
     ),
     lifespan=lifespan,
     docs_url="/docs",

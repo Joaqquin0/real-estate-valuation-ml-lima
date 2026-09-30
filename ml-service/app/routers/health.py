@@ -55,13 +55,10 @@ def modelo_info() -> ModeloInfoResponse:
     ipc_cfg = cfg.get("ipc_actual", {})
 
     distritos = (
-        model_state.data_provider.get_distritos_disponibles()  # type: ignore[union-attr]
+        model_state.data_provider.listar_distritos()  # type: ignore[union-attr]
         if model_state.data_provider
         else sorted(model_state.encoding_map.keys())
     )
-
-    import os
-    provider_type = os.getenv("DATA_PROVIDER", "csv").lower()
 
     return ModeloInfoResponse(
         version=cfg.get("modelo_version", "v2"),
@@ -82,7 +79,7 @@ def modelo_info() -> ModeloInfoResponse:
         ),
         n_features=cfg.get("n_features", 33),
         n_distritos=cfg.get("n_distritos", 22),
-        data_provider=provider_type,
+        data_provider="postgresql",
         distritos_disponibles=distritos,
     )
 
@@ -99,8 +96,9 @@ def modelo_info() -> ModeloInfoResponse:
 )
 def listar_distritos() -> DistritosResponse:
     distritos = (
-        model_state.data_provider.get_distritos_disponibles()  # type: ignore[union-attr]
+        model_state.data_provider.listar_distritos()  # type: ignore[union-attr]
         if model_state.data_provider
         else sorted(model_state.encoding_map.keys())
     )
     return DistritosResponse(distritos=distritos, total=len(distritos))
+

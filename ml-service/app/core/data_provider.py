@@ -1,130 +1,157 @@
 """
 app/core/data_provider.py
 ─────────────────────────
-Abstracción de la fuente de datos contextuales de distrito.
+Proveedor de contexto distrital para el servicio de inferencia.
 
-Fase 1 → CSVContextProvider (lee distrito_contexto_ref.csv en memoria)
-Fase 2 → MongoContextProvider (hereda la misma interfaz, sin tocar
-          prediccion_service.py ni ningún router)
+Al startup del servicio, PostgreSQLContextProvider conecta a inmobiliaria_ml_db
+y carga en memoria el contexto distrital más reciente (último año disponible
+por distrito) desde la tabla distrito_anio_contexto.
 
-El cambio de fase es una sola línea en app/core/model_loader.py.
+Esto evita una consulta a BD en cada predicción individual:
+  - El contexto distrital se precarga una sola vez al arrancar
+  - Las predicciones leen del dict en memoria (<< 1ms)
+  - El contexto se refresca automáticamente en cada reinicio o reentrenamiento
+
+Tabla consumida: distrito_anio_contexto (JOIN con distritos)
+Tablas NO tocadas: dataset_inmuebles_venta, auditoria_flags_imputacion, pipeline_ejecuciones
 """
 
 from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
-from typing import Any
 
+import psycopg2
 import pandas as pd
 
 
-# ─── Columnas contextuales requeridas ─────────────────────────────────────────
-
-CONTEXT_COLS: list[str] = [
-    "pct_NSE_A", "pct_NSE_B", "pct_NSE_C", "pct_NSE_D", "pct_NSE_E",
-    "tasa_robo", "tasa_hurto",
-    "poblacion_proyectada", "area_distrito_km2", "densidad_hab_km2",
-    "distancia_centro_km",
-    "dist_colegio_km", "dist_hospital_km", "dist_estacion_transporte_km",
-    "dist_centro_comercial_km", "dist_parque_km", "dist_universidad_km",
-]
-
-
-# ─── Interfaz ─────────────────────────────────────────────────────────────────
+# ─── Interfaz abstracta ───────────────────────────────────────────────────────
 
 class IContextDataProvider(ABC):
     """
-    Contrato que deben cumplir todos los proveedores de contexto distrital.
-    prediccion_service.py solo depende de esta interfaz.
+    Interfaz para resolver el contexto distrital en tiempo de inferencia.
+
+    El contexto distrital incluye:
+      NSE (A-E), tasas de crimen, demografía y distancias a POIs.
+    Estos datos se resuelven por nombre de distrito y corresponden
+    al año más reciente disponible en la base de datos.
     """
 
     @abstractmethod
-    def get_distrito_context(self, distrito: str) -> dict[str, Any]:
+    def get_distrito_context(self, nombre_distrito: str) -> dict:
         """
-        Devuelve un diccionario con las variables contextuales del distrito.
-        Si el distrito no existe, devuelve los promedios globales (fallback).
+        Retorna el contexto distrital (dict) para usar en la predicción.
+
+        Args:
+            nombre_distrito: Nombre exacto del distrito (ej: 'San Miguel').
+
+        Returns:
+            Dict con claves: pct_NSE_A..E, tasa_robo, tasa_hurto,
+            poblacion_proyectada, area_distrito_km2, distancia_centro_km,
+            dist_colegio_km, dist_hospital_km, dist_estacion_transporte_km,
+            dist_centro_comercial_km, dist_parque_km, dist_universidad_km,
+            densidad_hab_km2.
+
+        Raises:
+            KeyError: Si el distrito no existe en el contexto cargado.
         """
         ...
 
     @abstractmethod
-    def get_distritos_disponibles(self) -> list[str]:
-        """Lista de distritos con datos contextuales disponibles."""
-        ...
-
-    @abstractmethod
-    def get_global_means(self) -> dict[str, float]:
-        """Medias globales de todas las variables contextuales (usado como fallback)."""
+    def listar_distritos(self) -> list[str]:
+        """Retorna la lista de distritos disponibles en el contexto."""
         ...
 
 
-# ─── Fase 1: CSV ──────────────────────────────────────────────────────────────
+# ─── Implementación PostgreSQL ────────────────────────────────────────────────
 
-class CSVContextProvider(IContextDataProvider):
+_QUERY_CONTEXTO = """
+SELECT
+    d.nombre                     AS distrito,
+    c.pct_nse_a                  AS pct_NSE_A,
+    c.pct_nse_b                  AS pct_NSE_B,
+    c.pct_nse_c                  AS pct_NSE_C,
+    c.pct_nse_d                  AS pct_NSE_D,
+    c.pct_nse_e                  AS pct_NSE_E,
+    c.tasa_robo,
+    c.tasa_hurto,
+    c.poblacion_proyectada,
+    c.densidad_hab_km2,
+    c.distancia_centro_km,
+    c.dist_colegio_km,
+    c.dist_hospital_km,
+    c.dist_estacion_transporte_km,
+    c.dist_centro_comercial_km,
+    c.dist_parque_km,
+    c.dist_universidad_km,
+    c.area_distrito_km2
+FROM distrito_anio_contexto c
+JOIN distritos d ON c.distrito_id = d.id
+WHERE (c.distrito_id, c.anio) IN (
+    SELECT distrito_id, MAX(anio)
+    FROM distrito_anio_contexto
+    GROUP BY distrito_id
+)
+ORDER BY d.nombre;
+"""
+
+
+class PostgreSQLContextProvider(IContextDataProvider):
     """
-    Lee distrito_contexto_ref.csv en memoria al iniciar el servicio.
-    Carga única — sin I/O por request.
+    Carga el contexto distrital desde PostgreSQL al iniciar el servicio.
+
+    Precarga en memoria el contexto más reciente de cada distrito
+    (último año disponible en distrito_anio_contexto).
+    Las predicciones leen desde el dict en RAM — sin latencia de BD.
     """
 
-    def __init__(self, csv_path: str) -> None:
-        if not os.path.exists(csv_path):
-            raise FileNotFoundError(
-                f"[CSVContextProvider] No se encontró el archivo de contexto: {csv_path}\n"
-                "Asegúrate de que 'data/distrito_contexto_ref.csv' existe "
-                "(se genera con el notebook 02_preprocesamiento.py)."
-            )
-        self._df: pd.DataFrame = pd.read_csv(csv_path)
-        self._global_means: dict[str, float] = {
-            col: float(self._df[col].mean())
-            for col in CONTEXT_COLS
-            if col in self._df.columns
+    def __init__(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        db_name: str | None = None,
+        user: str | None = None,
+        password: str | None = None,
+    ) -> None:
+        self._conn_params = {
+            "host":     host     or os.getenv("DB_HOST", "localhost"),
+            "port":     port     or int(os.getenv("DB_PORT", "5432")),
+            "dbname":   db_name  or os.getenv("DB_NAME", "inmobiliaria_ml_db"),
+            "user":     user     or os.getenv("DB_USER", "postgres"),
+            "password": password or os.getenv("DB_PASSWORD", ""),
         }
-        print(
-            f"[CSVContextProvider] Cargado: {len(self._df)} distritos "
-            f"desde {os.path.basename(csv_path)}"
-        )
+        self._contexto: dict[str, dict] = {}
+        self._cargar()
 
-    def get_distrito_context(self, distrito: str) -> dict[str, Any]:
-        fila = self._df[self._df["Distrito"] == distrito]
-        if fila.empty:
-            print(
-                f"[CSVContextProvider] Distrito '{distrito}' sin contexto. "
-                "Usando medias globales como fallback."
+    def _cargar(self) -> None:
+        """Ejecuta la consulta y carga el contexto en memoria."""
+        conn = psycopg2.connect(**self._conn_params)
+        try:
+            df = pd.read_sql_query(_QUERY_CONTEXTO, conn)
+        finally:
+            conn.close()
+
+        if df.empty:
+            raise RuntimeError(
+                "La tabla 'distrito_anio_contexto' no retornó datos. "
+                "Verifica que la BD tenga datos de contexto cargados."
             )
-            return self._global_means.copy()
-        return fila.iloc[0][CONTEXT_COLS].to_dict()
 
-    def get_distritos_disponibles(self) -> list[str]:
-        return sorted(self._df["Distrito"].dropna().tolist())
+        for _, row in df.iterrows():
+            self._contexto[row["distrito"]] = row.drop("distrito").to_dict()
 
-    def get_global_means(self) -> dict[str, float]:
-        return self._global_means.copy()
-
-
-# ─── Fase 2: MongoDB (stub — implementar en fase siguiente) ───────────────────
-
-class MongoContextProvider(IContextDataProvider):
-    """
-    Placeholder para la Fase 2.
-    Reemplaza CSVContextProvider sin tocar prediccion_service.py.
-
-    Implementación pendiente:
-      - Conectar a MongoDB con motor/pymongo
-      - Colección: distrito_contexto (un doc por distrito)
-      - Caché local en memoria para evitar queries por request
-    """
-
-    def __init__(self, connection_string: str, db: str, collection: str) -> None:
-        raise NotImplementedError(
-            "MongoContextProvider está pendiente para Fase 2. "
-            "Usa DATA_PROVIDER=csv en el .env para Fase 1."
+        print(
+            f"[PostgreSQLContextProvider] Cargado: {len(self._contexto)} distritos "
+            f"desde '{self._conn_params['dbname']}'."
         )
 
-    def get_distrito_context(self, distrito: str) -> dict[str, Any]:
-        raise NotImplementedError
+    def get_distrito_context(self, nombre_distrito: str) -> dict:
+        if nombre_distrito not in self._contexto:
+            raise KeyError(
+                f"Distrito '{nombre_distrito}' no encontrado en el contexto distrital. "
+                f"Disponibles: {sorted(self._contexto.keys())}"
+            )
+        return self._contexto[nombre_distrito]
 
-    def get_distritos_disponibles(self) -> list[str]:
-        raise NotImplementedError
-
-    def get_global_means(self) -> dict[str, float]:
-        raise NotImplementedError
+    def listar_distritos(self) -> list[str]:
+        return sorted(self._contexto.keys())
