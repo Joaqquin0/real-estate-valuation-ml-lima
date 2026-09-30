@@ -12,6 +12,8 @@ Endpoints registrados:
   GET  /api/v1/modelo/info
   GET  /api/v1/distritos
   POST /api/v1/prediccion/venta
+  POST /api/v1/admin/entrenamiento/venta   (requiere X-Admin-Token)
+  GET  /api/v1/admin/entrenamiento/estado/{job_id}
 
 Documentación automática:
   GET  /docs      → Swagger UI
@@ -32,6 +34,7 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv()
 
 from app.core.model_loader import cargar_modelo, liberar_recursos, model_state
+from app.routers import entrenamiento as entrenamiento_router
 from app.routers import health as health_router
 from app.routers import prediccion as prediccion_router
 
@@ -79,6 +82,9 @@ app = FastAPI(
         "Este servicio **no persiste datos**. Recibe y devuelve JSON. "
         "El almacenamiento y presentación al usuario final es responsabilidad "
         "del módulo de precios (módulo externo).\n\n"
+        "### Administración\n"
+        "- `POST /api/v1/admin/entrenamiento/venta` — Reentrenamiento desde PostgreSQL (requiere `X-Admin-Token`)\n"
+        "- `GET /api/v1/admin/entrenamiento/estado/{job_id}` — Progreso del job\n\n"
         "### Roadmap\n"
         "- **Fase 2**: Migración de datos contextuales a MongoDB (sin cambios en endpoints)\n"
         "- **Fase 3**: Endpoint `POST /api/v1/prediccion/alquiler` con modelo de alquiler\n"
@@ -110,3 +116,4 @@ app.add_middleware(
 
 app.include_router(health_router.router)
 app.include_router(prediccion_router.router)
+app.include_router(entrenamiento_router.router)
