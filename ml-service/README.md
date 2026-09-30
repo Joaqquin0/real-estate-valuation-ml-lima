@@ -193,12 +193,10 @@ La suma `valor_base + Σshap_values` ≈ `log1p(precio_constantes)`.
 
 ---
 
-## Roadmap
+## Reentrenamiento Asíncrono (Admin)
 
-| Fase | Cambio | Impacto en servicio |
-|------|--------|---------------------|
-| **Fase 2** | Reemplazar `CSVContextProvider` por `MongoContextProvider` | Solo cambia `DATA_PROVIDER=mongo` en `.env` + implementar `MongoContextProvider` en `data_provider.py`. **Cero cambios** en `prediccion_service.py` |
-| **Fase 3** | Modelo de alquiler | Agregar `POST /api/v1/prediccion/alquiler` con el nuevo modelo. **Sin romper** el endpoint de venta |
+Para consultar en profundidad la arquitectura, pasos del pipeline (1 a 8), ponderación temporal E1 para alquiler, hot-reload y ejemplos de integración con cURL y Python, consulta la guía dedicada:
+- [Documentación Técnica de Reentrenamiento](DOCUMENTACION_REENTRENAMIENTO.md)
 
 ---
 
