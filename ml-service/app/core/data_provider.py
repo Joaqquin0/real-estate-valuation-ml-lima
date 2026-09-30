@@ -84,7 +84,7 @@ SELECT
     c.dist_centro_comercial_km,
     c.dist_parque_km,
     c.dist_universidad_km,
-    NULL::float AS area_distrito_km2
+    c.area_distrito_km2
 FROM distrito_anio_contexto c
 JOIN distritos d ON c.distrito_id = d.id
 WHERE (c.distrito_id, c.anio) IN (
@@ -94,9 +94,6 @@ WHERE (c.distrito_id, c.anio) IN (
 )
 ORDER BY d.nombre;
 """
-# NOTA: area_distrito_km2 se pasa como NULL (0.0 en inferencia) porque
-# la tabla distrito_anio_contexto aun no tiene esa columna.
-# Cuando se agregue a la BD, reemplazar NULL::float por c.area_distrito_km2
 
 
 class PostgreSQLContextProvider(IContextDataProvider):

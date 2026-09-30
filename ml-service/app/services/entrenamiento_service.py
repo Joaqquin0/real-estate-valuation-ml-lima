@@ -80,6 +80,21 @@ def get_job_status(job_id: str) -> dict[str, Any]:
         return dict(_job_registry[job_id])
 
 
+def get_latest_job() -> dict[str, Any] | None:
+    """Retorna el último job registrado o None si no hay ninguno."""
+    with _job_lock:
+        if not _job_registry:
+            return None
+        ultimo_id = list(_job_registry.keys())[-1]
+        return dict(_job_registry[ultimo_id])
+
+
+def list_all_jobs() -> list[dict[str, Any]]:
+    """Retorna la lista de todos los jobs registrados."""
+    with _job_lock:
+        return [dict(j) for j in _job_registry.values()]
+
+
 def _update_job(job_id: str, **kwargs: Any) -> None:
     """Actualiza campos del job en el registry de forma thread-safe."""
     with _job_lock:
@@ -295,12 +310,12 @@ def _run_training_pipeline(
                 "Revisa el JOIN en db_provider.py o la guía de entrenamiento."
             )
 
-        X_train = df_train[FEATURE_COLS]
-        X_test  = df_test[FEATURE_COLS]
+        X_train = df_train[FEATURE_COLS].astype(float)
+        X_test  = df_test[FEATURE_COLS].astype(float)
 
         # Transformación logarítmica del target (Soles Constantes)
-        y_train = np.log1p(df_train["Precio_Soles_Const"].values)
-        y_test  = np.log1p(df_test["Precio_Soles_Const"].values)
+        y_train = np.log1p(df_train["Precio_Soles_Const"].astype(float).values)
+        y_test  = np.log1p(df_test["Precio_Soles_Const"].astype(float).values)
 
         # ── Paso 5: Entrenamiento XGBoost ─────────────────────────────────────
         _update_job(job_id, progreso=f"[5/8] Entrenando XGBRegressor (params: n_estimators={params.get('n_estimators', '?')})...")
@@ -358,7 +373,9 @@ def _run_training_pipeline(
         else:
             config_actual = {}
 
-        ahora_str = datetime.now(timezone.utc).strftime("%Y-Q%q")  # ej: "2026-Q4"
+        now_utc = datetime.now(timezone.utc)
+        quarter = (now_utc.month - 1) // 3 + 1
+        ahora_str = f"{now_utc.year}-Q{quarter}"
         # Extraer versión del nombre
         version = nombre_modelo.split("_")[-1] if "_" in nombre_modelo else "v2"
 
@@ -378,18 +395,31 @@ def _run_training_pipeline(
             "n_distritos":     len(encoding_map),
             "train_periodo":   "2016-2023",
             "test_periodo":    "2024-2025",
-            "retrained_at":    datetime.now(timezone.utc).isoformat(),
+            "retrained_at":    now_utc.isoformat(),
         }
 
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(config_actualizada, f, indent=2, ensure_ascii=False)
+
+        # 7e. Actualizar features_metadata.json
+        metadata_path = os.getenv("METADATA_PATH", "data/features_metadata.json")
+        metadata_actualizada = {
+            "features": FEATURE_COLS,
+            "encoding_map_distrito": encoding_map,
+            "media_global_target": media_global,
+            "target": "Precio_Soles_Const",
+            "transformacion": "log1p",
+            "updated_at": now_utc.isoformat(),
+        }
+        with open(metadata_path, "w", encoding="utf-8") as f:
+            json.dump(metadata_actualizada, f, indent=2, ensure_ascii=False)
 
         # ── Paso 8: Hot-reload del modelo en memoria ──────────────────────────
         _update_job(job_id, progreso="[8/8] Recargando modelo en memoria del servicio (hot-reload)...")
         print(f"[EntrenamientoService][{job_id}] Paso 8: Hot-reload en memoria...")
 
         from app.core.model_loader import cargar_modelo
-        cargar_modelo(state)
+        cargar_modelo(state, model_path_override=pkl_path)
 
         duracion = round(time.time() - inicio, 2)
 

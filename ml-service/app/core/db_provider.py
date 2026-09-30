@@ -97,6 +97,7 @@ SELECT
     c.tasa_robo,
     c.tasa_hurto,
     c.poblacion_proyectada,
+    c.area_distrito_km2,
     c.densidad_hab_km2,
     c.distancia_centro_km,
     c.dist_colegio_km,
@@ -187,7 +188,11 @@ class PostgreSQLTrainingProvider(ITrainingDataProvider):
 
         conn = self._get_connection()
         try:
-            df = pd.read_sql_query(query, conn)
+            cur = conn.cursor()
+            cur.execute(query)
+            cols = [desc[0] for desc in cur.description]
+            rows = cur.fetchall()
+            df = pd.DataFrame(rows, columns=cols)
         finally:
             conn.close()
 
@@ -196,6 +201,13 @@ class PostgreSQLTrainingProvider(ITrainingDataProvider):
                 f"La consulta para split='{split}' no retornó filas. "
                 "Verifica que la BD tenga datos cargados."
             )
+
+        # Convertir tipos numéricos (Decimals de psycopg2 a float/int estándar)
+        for col in df.columns:
+            if col not in ("distrito", "split_dataset", "vista_exterior"):
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        if "vista_exterior" in df.columns:
+            df["vista_exterior"] = df["vista_exterior"].astype(bool)
 
         print(
             f"[PostgreSQLTrainingProvider] Cargados {len(df):,} registros "

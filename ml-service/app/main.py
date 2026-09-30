@@ -26,11 +26,13 @@ import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from dotenv import load_dotenv
+from pathlib import Path
+from dotenv import find_dotenv, load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # Cargar .env antes de cualquier otra importación que lea variables de entorno
+load_dotenv(find_dotenv(usecwd=True))
 load_dotenv()
 
 from app.core.model_loader import cargar_modelo, liberar_recursos, model_state

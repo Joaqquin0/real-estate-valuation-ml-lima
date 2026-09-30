@@ -53,31 +53,49 @@ model_state = ModelState()
 
 # ─── Función de carga ─────────────────────────────────────────────────────────
 
-def cargar_modelo(state: ModelState) -> None:
+def cargar_modelo(state: ModelState, model_path_override: str | None = None) -> None:
     """
     Carga todos los artefactos del modelo en el ModelState proporcionado.
     Lanza RuntimeError si algún archivo crítico no existe.
     """
-    model_path    = os.getenv("MODEL_PATH",    "models/xgboost_venta_v2.pkl")
     metadata_path = os.getenv("METADATA_PATH", "data/features_metadata.json")
     config_path   = os.getenv("CONFIG_PATH",   "config/model_config.json")
+    models_dir    = os.getenv("MODELS_DIR",    "models")
 
-    # ── 1. Modelo XGBoost ─────────────────────────────────────────────────────
+    # ── 1. Config del modelo (IPC, MAPE, version) ─────────────────────────────
+    if os.path.exists(config_path):
+        with open(config_path, encoding="utf-8") as f:
+            state.config = json.load(f)
+
+    # Determinar ruta del modelo:
+    # 1. model_path_override
+    # 2. MODEL_PATH env var
+    # 3. archivo indicado en config
+    # 4. default v2
+    config_model_file = state.config.get("modelo_archivo", "xgboost_venta_v2.pkl")
+    config_model_path = os.path.join(models_dir, config_model_file)
+    model_path = (
+        model_path_override
+        or os.getenv("MODEL_PATH")
+        or (config_model_path if os.path.exists(config_model_path) else os.path.join(models_dir, "xgboost_venta_v2.pkl"))
+    )
+
+    # ── 2. Modelo XGBoost ─────────────────────────────────────────────────────
     if not os.path.exists(model_path):
         raise RuntimeError(
             f"Modelo no encontrado: {model_path}\n"
-            "Copia 'xgboost_venta_v2.pkl' en ml-service/models/"
+            f"Verifica que el modelo exista en {models_dir}/"
         )
     print(f"[ModelLoader] Cargando modelo: {model_path} ...")
     state.modelo = joblib.load(model_path)
     print(f"[ModelLoader] [OK] Modelo cargado ({os.path.getsize(model_path) / 1e6:.1f} MB)")
 
-    # ── 2. SHAP TreeExplainer (la operación más costosa del startup) ──────────
+    # ── 3. SHAP TreeExplainer (la operación más costosa del startup) ──────────
     print("[ModelLoader] Inicializando SHAP TreeExplainer ...")
     state.explainer = shap.TreeExplainer(state.modelo)
     print("[ModelLoader] [OK] SHAP TreeExplainer listo")
 
-    # ── 3. Features metadata ──────────────────────────────────────────────────
+    # ── 4. Features metadata ──────────────────────────────────────────────────
     if not os.path.exists(metadata_path):
         raise RuntimeError(
             f"Metadata no encontrada: {metadata_path}\n"
@@ -94,18 +112,12 @@ def cargar_modelo(state: ModelState) -> None:
         f"{len(state.encoding_map)} distritos"
     )
 
-    # ── 4. Config del modelo (IPC, MAPE, version) ─────────────────────────────
-    if not os.path.exists(config_path):
-        raise RuntimeError(
-            f"Config no encontrada: {config_path}\n"
-            "Verifica que existe 'config/model_config.json'"
+    if state.config:
+        ipc_info = state.config.get("ipc_actual", {})
+        print(
+            f"[ModelLoader] [OK] Config: version={state.config.get('modelo_version', '?')}, "
+            f"IPC={ipc_info.get('valor', '?')} ({ipc_info.get('periodo', '?')})"
         )
-    with open(config_path, encoding="utf-8") as f:
-        state.config = json.load(f)
-    print(
-        f"[ModelLoader] [OK] Config: version={state.config['modelo_version']}, "
-        f"IPC={state.config['ipc_actual']['valor']} ({state.config['ipc_actual']['periodo']})"
-    )
 
     # ── 5. Contexto distrital desde PostgreSQL ────────────────────────────────
     print("[ModelLoader] Cargando contexto distrital desde PostgreSQL ...")

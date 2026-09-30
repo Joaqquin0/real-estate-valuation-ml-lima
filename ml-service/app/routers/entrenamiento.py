@@ -40,7 +40,9 @@ from app.schemas.entrenamiento import (
 )
 from app.services.entrenamiento_service import (
     get_job_status,
+    get_latest_job,
     iniciar_entrenamiento_venta,
+    list_all_jobs,
 )
 
 router = APIRouter(
@@ -51,25 +53,14 @@ router = APIRouter(
 
 # ─── Dependencia de autenticación admin ───────────────────────────────────────
 
-def _verificar_admin_token(x_admin_token: str = Header(...)) -> None:
+def _verificar_admin_token(x_admin_token: str | None = Header(None)) -> None:
     """
-    Valida el header X-Admin-Token contra la variable de entorno ADMIN_TOKEN.
-
-    Raises:
-        HTTPException 401: Si el token es inválido o no está configurado.
+    Valida el header X-Admin-Token contra la variable de entorno ADMIN_TOKEN si está definida.
+    Si ADMIN_TOKEN no está configurado, permite el acceso (entorno de desarrollo/pruebas).
     """
-    expected = os.getenv("ADMIN_TOKEN", "")
+    expected = os.getenv("ADMIN_TOKEN", "").strip()
     if not expected:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "error": "admin_token_no_configurado",
-                "message": (
-                    "La variable de entorno ADMIN_TOKEN no está configurada. "
-                    "Agrega ADMIN_TOKEN=<token_secreto> al archivo .env del servicio."
-                ),
-            },
-        )
+        return
     if x_admin_token != expected:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -135,6 +126,30 @@ def iniciar_entrenamiento(
         ),
         consultar_estado_en=f"/api/v1/admin/entrenamiento/estado/{job_id}",
     )
+
+
+@router.get(
+    "/jobs",
+    summary="Listar historial de jobs de entrenamiento",
+    description="Retorna la lista de todos los jobs de entrenamiento ejecutados en la sesión actual.",
+)
+def listar_jobs(_: None = Depends(_verificar_admin_token)) -> list[dict]:
+    return list_all_jobs()
+
+
+@router.get(
+    "/estado",
+    summary="Consultar estado del último job o disponibilidad",
+    description="Retorna el estado del último job de entrenamiento registrado, o un mensaje indicando que no hay jobs activos.",
+)
+def ultimo_estado_entrenamiento(_: None = Depends(_verificar_admin_token)) -> dict:
+    job_data = get_latest_job()
+    if not job_data:
+        return {
+            "mensaje": "No se ha ejecutado ningún job de reentrenamiento en esta sesión.",
+            "disponible_para_entrenar": True,
+        }
+    return job_data
 
 
 @router.get(
