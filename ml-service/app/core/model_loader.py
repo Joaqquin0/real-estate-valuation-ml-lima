@@ -64,13 +64,45 @@ model_state = ModelState()
 
 # ─── Funciones de carga ───────────────────────────────────────────────────────
 
+from pathlib import Path
+
+
 def _resolver_ruta(ruta: str) -> str:
-    """Resuelve la ruta comprobando el CWD actual y el subdirectorio ml-service."""
+    """
+    Resuelve la ruta comprobando:
+    1. Si existe en la ruta dada (CWD actual)
+    2. Relativa a ml-service
+    3. Relativa a la raíz del repositorio
+    4. En data/processed/ o data/ si busca metadata
+    5. En models/ si busca archivos de modelo
+    """
     if os.path.exists(ruta):
         return ruta
-    alt = os.path.join("ml-service", ruta)
-    if os.path.exists(alt):
-        return alt
+
+    try:
+        archivo_actual = Path(__file__).resolve()
+        ml_service_dir = archivo_actual.parents[2]  # <repo>/ml-service
+        repo_root = archivo_actual.parents[3]       # <repo>
+    except (IndexError, ValueError):
+        ml_service_dir = Path.cwd()
+        repo_root = ml_service_dir.parent
+
+    nombre_archivo = os.path.basename(ruta)
+
+    candidatos = [
+        ml_service_dir / ruta,
+        repo_root / ruta,
+        repo_root / "data" / "processed" / nombre_archivo,
+        ml_service_dir / "data" / "processed" / nombre_archivo,
+        ml_service_dir / "data" / nombre_archivo,
+        repo_root / "models" / nombre_archivo,
+        ml_service_dir / "models" / nombre_archivo,
+    ]
+
+    for c in candidatos:
+        if c.exists():
+            return str(c.resolve())
+
     return ruta
 
 
