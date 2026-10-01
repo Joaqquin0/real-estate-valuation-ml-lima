@@ -212,6 +212,107 @@ Todos los endpoints administrativos están bajo el prefijo `/api/v1/admin/entren
 
 ---
 
+### 3.5. Benchmark Comparativo (Producción vs Candidatos)
+
+Permite al frontend renderizar la comparativa métrica lado a lado para la toma de decisión del administrador:
+
+- **Método**: `GET`
+- **Ruta**: `/api/v1/admin/modelos/benchmark/{tipo_operacion}` *(venta | alquiler)*
+- **Headers**:
+  - `X-Admin-Token: <token>`
+
+- **Respuesta (200 OK)**:
+```json
+{
+  "tipo_operacion": "venta",
+  "benchmark_referencial_mape": 15.0,
+  "modelo_produccion": {
+    "nombre_modelo": "xgboost_venta",
+    "version": "1",
+    "stage": "Production",
+    "metricas": {
+      "mape_pct": 15.04,
+      "r2": 0.7469,
+      "mae": 52165.93,
+      "rmse": 78170.0
+    }
+  },
+  "candidatos": [
+    {
+      "candidato": {
+        "nombre_modelo": "xgboost_venta",
+        "version": "2",
+        "stage": "Candidate",
+        "metricas": {
+          "mape_pct": 13.85,
+          "r2": 0.8124,
+          "mae": 47520.1,
+          "rmse": 71200.5
+        }
+      },
+      "deltas": {
+        "delta_mape_pct": -1.19,
+        "delta_r2": 0.0655,
+        "delta_mae": -4645.83,
+        "delta_rmse": -6969.5,
+        "mejora_mape": true,
+        "mejora_r2": true
+      },
+      "recomendacion": "RECOMENDADO_PARA_PRODUCCION",
+      "motivo": "El candidato mejora el desempeño frente a producción (ΔMAPE: -1.19%, ΔR²: +0.0655) y supera el benchmark exigido (15.0%)."
+    }
+  ],
+  "total_candidatos": 1
+}
+```
+
+---
+
+### 3.6. Historial de Versiones en Model Registry
+
+- **Método**: `GET`
+- **Ruta**: `/api/v1/admin/modelos/historial/{tipo_operacion}`
+- **Headers**:
+  - `X-Admin-Token: <token>`
+
+---
+
+### 3.7. Promover Modelo Candidato a Producción (Gobernanza Humana)
+
+Acción humana de aprobación: el administrador confirma el pase a producción del modelo candidato.
+1. MLflow actualiza la versión a `Production` y archiva la anterior.
+2. El microservicio descarga el modelo y lo carga directamente en **memoria RAM**.
+3. Reconstruye el `TreeExplainer` de SHAP en RAM con cero downtime.
+
+- **Método**: `POST`
+- **Ruta**: `/api/v1/admin/modelos/promover`
+- **Headers**:
+  - `Content-Type: application/json`
+  - `X-Admin-Token: <token>`
+- **Body**:
+```json
+{
+  "tipo_operacion": "venta",
+  "version": 2,
+  "motivo": "Aprobación tras verificar mejora de MAPE de 15.04% a 13.85% en el benchmark"
+}
+```
+
+- **Respuesta (200 OK)**:
+```json
+{
+  "exito": true,
+  "mensaje": "Modelo xgboost_venta v2 promovido exitosamente a Producción y cargado en memoria RAM.",
+  "tipo_operacion": "venta",
+  "version_promovida": "2",
+  "version_anterior_archivada": "1",
+  "modelo_cargado_en_ram": true,
+  "promovido_en": "2026-10-01T05:00:00Z"
+}
+```
+
+---
+
 ## 4. Detalles Metodológicos Implementados
 
 ### 4.1. Extracción de Datos
