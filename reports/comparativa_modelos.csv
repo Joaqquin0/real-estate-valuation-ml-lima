@@ -1,3 +1,0 @@
-﻿Modelo,MAE (S/.),RMSE (S/.),MAPE (%),R2,Benchmark
-M1 - BCRP Baseline,"52,049","78,145",14.94%,0.7471,OK (17.89%)
-M2 - BCRP Final (E1 + 33 feat),"52,166","78,170",15.04%,0.7470,OK (17.89%)
