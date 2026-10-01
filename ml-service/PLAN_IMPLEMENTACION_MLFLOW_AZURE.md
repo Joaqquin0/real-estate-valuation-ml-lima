@@ -7,7 +7,10 @@ Este plan define la hoja de ruta técnica para incorporar **MLflow Open Source**
 ### Objetivos Clave:
 1. **Gobernanza y Validación Humana (*Human-in-the-Loop*):** Ningún modelo reentrenado pasa a producción automáticamente. Queda registrado como candidato (`Staging` / `Candidate`) hasta que el usuario/administrador valide el benchmark comparativo frente al modelo actualmente en producción.
 2. **Almacenamiento Desacoplado y Contenedores *Stateless*:** Eliminar la dependencia de archivos binarios `.pkl` en el disco local del repositorio o contenedor Docker. Los modelos se almacenan en Azure Blob Storage y se cargan **exclusivamente en memoria RAM** mediante streaming/descarga en el ciclo de vida de la aplicación.
-3. **Costo-Eficiencia (Open Source):** Uso de MLflow Tracking Server Open Source con backend store en PostgreSQL (schema `mlops` en la misma instancia de BD) y Azure Blob Storage como artifact store económico (~$0.018 USD/GB/mes).
+3. **Costo-Eficiencia y Separación de Bases de Datos:**
+   - **`inmobiliaria_ml_db`:** Permanece 100% exclusiva y aislada para los datos históricos de inmuebles y contexto distrital. MLflow **nunca** escribe en ella.
+   - **`db_operacional_valuo`:** Es la base de datos operacional del sistema; en ella se utiliza el schema dedicado `mlops` (o `monitoreo`) como backend store de MLflow.
+   - **Azure Blob Storage:** Almacena los artefactos pesados (`.pkl`) de forma sumamente económica (~$0.018 USD/GB/mes).
 4. **Cero Downtime (*Hot-Reload* Seguro):** Cuando el administrador aprueba una versión candidata, el microservicio descarga el artefacto a RAM y actualiza la referencia en caliente sin interrumpir el servicio de inferencia.
 
 ---
@@ -22,34 +25,34 @@ flowchart TD
         BTN_PROMOTE[5. Aprobar y Promover a Producción]
     end
 
-    subgraph Service["ml-service (FastAPI)"]
+    subgraph Service["ml-service (FastAPI - Servicio de ML)"]
         ROUTER_TRAIN[/api/v1/admin/entrenamiento/*]
         ROUTER_MODELS[/api/v1/admin/modelos/*]
         TRAIN_SVC[EntrenamientoService]
         LOADER[ModelLoader\n(RAM Singleton)]
     end
 
-    subgraph MLOps["Servidor MLflow Open Source"]
-        TRACKING[MLflow Tracking Server]
+    subgraph MLOps["Servidor Externo: MLflow Tracking & Registry"]
+        TRACKING[MLflow Server - Puerto 5000]
         REGISTRY[Model Registry\n- xgboost_venta\n- xgboost_alquiler]
     end
 
-    subgraph Storage["Persistencia"]
-        DB_POSTGRES[(PostgreSQL\ninmobiliaria_ml_db)]
-        DB_MLOPS[(PostgreSQL\nschema: mlops)]
+    subgraph Storage["Bases de Datos y Storage"]
+        DB_TRAIN[(PostgreSQL: inmobiliaria_ml_db\nSOLO Datos de Entrenamiento)]
+        DB_OPS[(PostgreSQL: db_operacional_valuo\nschema: mlops / monitoreo)]
         AZURE_BLOB[(Azure Blob Storage\nContenedor: ml-artifacts)]
     end
 
     BTN_TRAIN --> ROUTER_TRAIN
     ROUTER_TRAIN --> TRAIN_SVC
-    TRAIN_SVC -->|Lee datos históricos| DB_POSTGRES
-    TRAIN_SVC -->|Registra Params y Métricas| TRACKING
-    TRACKING -->|Guarda Runs| DB_MLOPS
+    TRAIN_SVC -->|1. Lee datos de inmuebles| DB_TRAIN
+    TRAIN_SVC -->|2. Envía Params y Métricas| TRACKING
+    TRACKING -->|Guarda Runs en schema mlops| DB_OPS
     TRAIN_SVC -->|Sube modelo serializado| AZURE_BLOB
-    TRAIN_SVC -->|Registra nueva versión como Candidato| REGISTRY
+    TRAIN_SVC -->|Registra versión candidata| REGISTRY
 
     VIEW_BENCH --> ROUTER_MODELS
-    ROUTER_MODELS -->|Consulta métricas y diff| REGISTRY
+    ROUTER_MODELS -->|Consulta comparativa y diff| REGISTRY
 
     BTN_PROMOTE --> ROUTER_MODELS
     ROUTER_MODELS -->|Promueve versión a 'Production'| REGISTRY
