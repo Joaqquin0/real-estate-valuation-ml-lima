@@ -57,6 +57,10 @@ class EntrenamientoBaseRequest(BaseModel):
         ge=5, le=33,
         description="Número de contribuciones SHAP a incluir en la respuesta de inferencia.",
     )
+    guardar_como_activo: bool = Field(
+        default=False,
+        description="Si es False (recomendado por gobernanza), el modelo se registra como Candidato en MLflow para validación humana. Si es True, pasa de inmediato a producción.",
+    )
 
 
 class EntrenamientoVentaRequest(EntrenamientoBaseRequest):
@@ -133,6 +137,10 @@ class ArtifactosGenerados(BaseModel):
     modelo_recargado_en_memoria: bool = Field(
         description="True si el modelo fue cargado automáticamente en la app (hot-reload)."
     )
+    mlflow_model_uri: str | None = Field(
+        default=None,
+        description="URI del modelo registrado en MLflow (ej: 'models:/xgboost_venta/2').",
+    )
 
 
 class EstadoEntrenamientoResponse(BaseModel):
@@ -147,4 +155,7 @@ class EstadoEntrenamientoResponse(BaseModel):
     progreso: str = Field(default="", description="Paso actual del pipeline.")
     metricas: MetricasEntrenamiento | None = None
     artefactos: ArtifactosGenerados | None = None
+    mlflow_run_id: str | None = Field(default=None, description="ID de corrida en MLflow Tracking.")
+    mlflow_model_version: str | int | None = Field(default=None, description="Versión asignada en el Model Registry.")
+    estado_gobernanza: str = Field(default="candidate", description="Estado del modelo ('candidate' o 'production').")
     error: str | None = None

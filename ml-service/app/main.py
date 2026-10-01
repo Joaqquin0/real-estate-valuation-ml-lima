@@ -23,6 +23,7 @@ Documentación automática:
 from __future__ import annotations
 
 import os
+import sys
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -30,6 +31,13 @@ from pathlib import Path
 from dotenv import find_dotenv, load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 # Cargar .env antes de cualquier otra importación que lea variables de entorno
 load_dotenv(find_dotenv(usecwd=True))

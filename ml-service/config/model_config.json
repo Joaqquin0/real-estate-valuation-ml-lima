@@ -1,10 +1,10 @@
 {
-  "modelo_version": "v2p1",
-  "modelo_archivo": "xgboost_venta_v2p1.pkl",
-  "mape_test": 15.0526,
-  "r2_test": 0.7468,
-  "mae_test": 52274.3,
-  "rmse_test": 78200.87,
+  "modelo_version": "v3",
+  "modelo_archivo": "xgboost_venta_candidato_v3.pkl",
+  "mape_test": 15.6804,
+  "r2_test": 0.7366,
+  "mae_test": 53964.7,
+  "rmse_test": 79757.11,
   "train_periodo": "2016-2023",
   "test_periodo": "2024-2025",
   "ipc_actual": {
@@ -79,5 +79,5 @@
     "Surquillo": 337389.18379464396
   },
   "media_global_target": 443442.1447725986,
-  "retrained_at": "2026-09-30T17:27:59.786341+00:00"
+  "retrained_at": "2026-10-01T04:50:58.883098+00:00"
 }

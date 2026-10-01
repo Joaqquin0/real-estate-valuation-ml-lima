@@ -94,6 +94,7 @@ def iniciar_entrenamiento_modelo_venta(
         hiperparametros=request.hiperparametros,
         shap_top_n=request.shap_top_n,
         state=model_state,
+        guardar_como_activo=request.guardar_como_activo,
     )
 
     return EntrenamientoIniciadoResponse(
@@ -104,7 +105,7 @@ def iniciar_entrenamiento_modelo_venta(
         iniciado_en=datetime.utcnow(),
         mensaje=(
             f"Job de reentrenamiento de venta '{nombre}' iniciado. "
-            "El pipeline corre en background y puede tardar varios minutos."
+            "El pipeline corre en background y registrará el modelo en MLflow."
         ),
         consultar_estado_en=f"/api/v1/admin/entrenamiento/estado/{job_id}",
     )
@@ -137,6 +138,7 @@ def iniciar_entrenamiento_modelo_alquiler(
         hiperparametros=request.hiperparametros,
         shap_top_n=request.shap_top_n,
         state=model_state,
+        guardar_como_activo=request.guardar_como_activo,
     )
 
     return EntrenamientoIniciadoResponse(

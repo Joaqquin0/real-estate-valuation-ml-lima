@@ -33,19 +33,30 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 import joblib
+import mlflow
+import mlflow.xgboost
 import numpy as np
 import pandas as pd
 import shap
 from fastapi import HTTPException
 from xgboost import XGBRegressor
 
+from app.core.mlflow_client import mlflow_manager
 from app.schemas.entrenamiento import (
     ArtifactosGenerados,
     EstadoJob,
@@ -203,6 +214,7 @@ def _run_training_pipeline(
     hiperparametros: dict[str, Any] | None,
     shap_top_n: int,
     state: "ModelState",
+    guardar_como_activo: bool = False,
 ) -> None:
     """
     Pipeline completo de reentrenamiento para Venta o Alquiler.
@@ -430,12 +442,95 @@ def _run_training_pipeline(
         with open(metadata_path, "w", encoding="utf-8") as f:
             json.dump(metadata_actualizada, f, indent=2, ensure_ascii=False)
 
-        # ── Paso 8: Hot-reload del modelo en memoria ──────────────────────────
-        _update_job(job_id, progreso=f"[8/8] Recargando modelo de {tipo_operacion} en memoria...")
-        print(f"[EntrenamientoService][{job_id}] Paso 8: Hot-reload de {tipo_operacion}...")
+        # 7f. Registro en MLflow Tracking y Model Registry
+        mlflow_run_id = None
+        mlflow_model_version = None
+        mlflow_model_uri = None
 
-        from app.core.model_loader import cargar_modelo
-        cargar_modelo(state, tipo=tipo_operacion, model_path_override=pkl_path)
+        if mlflow_manager.check_connection():
+            try:
+                exp_name = os.getenv(
+                    f"MLFLOW_EXPERIMENT_{tipo_operacion.upper()}",
+                    f"experimento_tasacion_{tipo_operacion}",
+                )
+                exp_id = mlflow_manager.get_or_create_experiment(exp_name)
+                model_registry_name = os.getenv(
+                    f"MLFLOW_MODEL_NAME_{tipo_operacion.upper()}",
+                    f"xgboost_{tipo_operacion}",
+                )
+                run_name = f"{nombre_modelo}_{now_utc.strftime('%Y%m%d_%H%M%S')}"
+
+                print(f"[EntrenamientoService][{job_id}] Registrando corrida en MLflow (Experimento: {exp_name})...")
+                with mlflow.start_run(experiment_id=exp_id, run_name=run_name) as run:
+                    mlflow_run_id = run.info.run_id
+                    mlflow.log_params(params)
+                    mlflow.log_metrics({
+                        "mape_pct": float(metricas_dict["mape_pct"]),
+                        "r2": float(metricas_dict["r2"]),
+                        "mae": float(metricas_dict["mae"]),
+                        "rmse": float(metricas_dict["rmse"]),
+                        "n_train": int(metricas_dict["n_train"]),
+                        "n_test": int(metricas_dict["n_test"]),
+                    })
+                    mlflow.set_tag("tipo_operacion", tipo_operacion)
+                    mlflow.set_tag("job_id", job_id)
+                    mlflow.set_tag("nombre_modelo", nombre_modelo)
+                    mlflow.set_tag("estado_gobernanza", "production" if guardar_como_activo else "candidate")
+                    mlflow.set_tag("benchmark_superado", str(metricas_dict.get("supera_benchmark", False)))
+
+                    # Loguear artefactos adicionales
+                    mlflow.log_artifact(params_path)
+                    mlflow.log_artifact(metricas_path)
+                    mlflow.log_artifact(config_path)
+                    mlflow.log_artifact(metadata_path)
+
+                    # Registrar modelo en Model Registry
+                    reg_info = mlflow.xgboost.log_model(
+                        xgb_model=modelo,
+                        artifact_path="model",
+                        registered_model_name=model_registry_name,
+                    )
+                    mlflow_model_uri = reg_info.model_uri
+                    mlflow_model_version = getattr(reg_info, "registered_model_version", None)
+
+                # Si no vino directamente en reg_info, consultar versión asignada en Model Registry
+                if not mlflow_model_version:
+                    latest_candidates = mlflow_manager.get_latest_candidate_versions(model_registry_name, limit=1)
+                    if latest_candidates:
+                        mlflow_model_version = latest_candidates[0].version
+
+                print(
+                    f"[EntrenamientoService][{job_id}] [OK] Registrado en MLflow Registry: "
+                    f"'{model_registry_name}' v{mlflow_model_version} (Run ID: {mlflow_run_id})"
+                )
+
+                if guardar_como_activo and mlflow_model_version:
+                    mlflow_manager.promote_version_to_production(
+                        model_name=model_registry_name,
+                        version=mlflow_model_version,
+                        motivo="Promoción automática solicitada al iniciar entrenamiento",
+                    )
+            except Exception as e:
+                print(f"[EntrenamientoService][{job_id}] Advertencia: Fallo al registrar en MLflow: {e}")
+
+        # ── Paso 8: Hot-reload condicional según gobernanza ──────────────────
+        if guardar_como_activo:
+            _update_job(job_id, progreso=f"[8/8] Recargando modelo de {tipo_operacion} en memoria...")
+            print(f"[EntrenamientoService][{job_id}] Paso 8: Hot-reload de {tipo_operacion} (aprobado a producción)...")
+            from app.core.model_loader import cargar_modelo
+            cargar_modelo(state, tipo=tipo_operacion, model_path_override=pkl_path)
+            recargado = True
+            mensaje_progreso = f"[8/8] Entrenamiento de {tipo_operacion} completado y promovido a producción."
+            estado_gob = "production"
+        else:
+            recargado = False
+            version_txt = f" v{mlflow_model_version}" if mlflow_model_version else ""
+            mensaje_progreso = (
+                f"[8/8] Modelo entrenado y registrado en MLflow como Candidato{version_txt}. "
+                "En espera de validación administrativa para pase a producción."
+            )
+            estado_gob = "candidate"
+            print(f"[EntrenamientoService][{job_id}] Paso 8: Gobernanza activa. Modelo en espera de aprobación humana (no reemplaza producción en memoria).")
 
         duracion = round(time.time() - inicio, 2)
 
@@ -444,22 +539,26 @@ def _run_training_pipeline(
             params_json=params_path,
             metricas_json=metricas_path,
             model_config_json=config_path,
-            modelo_recargado_en_memoria=True,
+            modelo_recargado_en_memoria=recargado,
+            mlflow_model_uri=mlflow_model_uri,
         )
         metricas_obj = MetricasEntrenamiento(**metricas_dict)
 
         _update_job(
             job_id,
             estado=EstadoJob.COMPLETADO,
-            progreso=f"[8/8] Entrenamiento de {tipo_operacion} completado exitosamente.",
+            progreso=mensaje_progreso,
             completado_en=datetime.now(timezone.utc),
             duracion_segundos=duracion,
             metricas=metricas_obj,
             artefactos=artefactos,
+            mlflow_run_id=mlflow_run_id,
+            mlflow_model_version=mlflow_model_version,
+            estado_gobernanza=estado_gob,
         )
         print(
             f"[EntrenamientoService][{job_id}] Completado en {duracion}s. "
-            f"MAPE={metricas_dict['mape_pct']:.2f}%"
+            f"MAPE={metricas_dict['mape_pct']:.2f}% | Gobernanza={estado_gob}"
         )
 
     except Exception as exc:
@@ -486,6 +585,7 @@ def iniciar_entrenamiento(
     hiperparametros: dict[str, Any] | None,
     shap_top_n: int,
     state: "ModelState",
+    guardar_como_activo: bool = False,
 ) -> str:
     """
     Registra y lanza un job de reentrenamiento (venta o alquiler) en background.
@@ -517,12 +617,15 @@ def iniciar_entrenamiento(
             "progreso":           f"[0/8] Iniciando pipeline de entrenamiento ({tipo_operacion})...",
             "metricas":           None,
             "artefactos":         None,
+            "mlflow_run_id":      None,
+            "mlflow_model_version": None,
+            "estado_gobernanza":  "candidate",
             "error":              None,
         }
 
     thread = threading.Thread(
         target=_run_training_pipeline,
-        args=(job_id, tipo_operacion, nombre_modelo, hiperparametros, shap_top_n, state),
+        args=(job_id, tipo_operacion, nombre_modelo, hiperparametros, shap_top_n, state, guardar_como_activo),
         daemon=True,
         name=f"entrenamiento-{tipo_operacion}-{job_id[:8]}",
     )
@@ -537,8 +640,9 @@ def iniciar_entrenamiento_venta(
     hiperparametros: dict[str, Any] | None = None,
     shap_top_n: int = 10,
     state: "ModelState" | None = None,
+    guardar_como_activo: bool = False,
 ) -> str:
-    return iniciar_entrenamiento("venta", nombre_modelo, hiperparametros, shap_top_n, state)  # type: ignore[arg-type]
+    return iniciar_entrenamiento("venta", nombre_modelo, hiperparametros, shap_top_n, state, guardar_como_activo)  # type: ignore[arg-type]
 
 
 def iniciar_entrenamiento_alquiler(
@@ -546,5 +650,6 @@ def iniciar_entrenamiento_alquiler(
     hiperparametros: dict[str, Any] | None = None,
     shap_top_n: int = 10,
     state: "ModelState" | None = None,
+    guardar_como_activo: bool = False,
 ) -> str:
-    return iniciar_entrenamiento("alquiler", nombre_modelo, hiperparametros, shap_top_n, state)  # type: ignore[arg-type]
+    return iniciar_entrenamiento("alquiler", nombre_modelo, hiperparametros, shap_top_n, state, guardar_como_activo)  # type: ignore[arg-type]
