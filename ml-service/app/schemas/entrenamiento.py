@@ -47,9 +47,27 @@ class EntrenamientoBaseRequest(BaseModel):
         default=None,
         description="Nombre base del artefacto a generar (sin extensión).",
     )
+    max_depth: int | None = Field(
+        default=None,
+        ge=3, le=15,
+        description="Profundidad máxima de los árboles. Si se omite, usa el valor óptimo validado (6 venta / 7 alquiler).",
+        examples=[6],
+    )
+    learning_rate: float | None = Field(
+        default=None,
+        ge=0.001, le=1.0,
+        description="Tasa de aprendizaje (shrinkage). Si se omite, usa el valor óptimo validado (0.05 venta / 0.04 alquiler).",
+        examples=[0.05],
+    )
+    n_estimators: int | None = Field(
+        default=None,
+        ge=50, le=2000,
+        description="Cantidad de árboles. Si se omite, usa el valor óptimo validado (500 venta / 600 alquiler).",
+        examples=[500],
+    )
     hiperparametros: dict[str, Any] | None = Field(
         default=None,
-        description="Hiperparámetros del XGBRegressor. Si se omite, se usan los parámetros óptimos por defecto.",
+        description="Diccionario libre de hiperparámetros avanzados adicionales para XGBoost.",
         examples=[None],
     )
     shap_top_n: int = Field(

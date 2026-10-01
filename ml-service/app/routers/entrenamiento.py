@@ -95,6 +95,9 @@ def iniciar_entrenamiento_modelo_venta(
         shap_top_n=request.shap_top_n,
         state=model_state,
         guardar_como_activo=request.guardar_como_activo,
+        max_depth=request.max_depth,
+        learning_rate=request.learning_rate,
+        n_estimators=request.n_estimators,
     )
 
     return EntrenamientoIniciadoResponse(
@@ -139,6 +142,9 @@ def iniciar_entrenamiento_modelo_alquiler(
         shap_top_n=request.shap_top_n,
         state=model_state,
         guardar_como_activo=request.guardar_como_activo,
+        max_depth=request.max_depth,
+        learning_rate=request.learning_rate,
+        n_estimators=request.n_estimators,
     )
 
     return EntrenamientoIniciadoResponse(

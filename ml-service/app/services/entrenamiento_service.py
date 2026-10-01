@@ -215,6 +215,9 @@ def _run_training_pipeline(
     shap_top_n: int,
     state: "ModelState",
     guardar_como_activo: bool = False,
+    max_depth: int | None = None,
+    learning_rate: float | None = None,
+    n_estimators: int | None = None,
 ) -> None:
     """
     Pipeline completo de reentrenamiento para Venta o Alquiler.
@@ -262,7 +265,15 @@ def _run_training_pipeline(
         target_raw_col = "alquiler_soles_const"
         target_df_col = "Alquiler_Soles_Const"
 
-    params = hiperparametros or DEFAULT_PARAMS
+    params = dict(DEFAULT_PARAMS)
+    if hiperparametros:
+        params.update(hiperparametros)
+    if max_depth is not None:
+        params["max_depth"] = max_depth
+    if learning_rate is not None:
+        params["learning_rate"] = learning_rate
+    if n_estimators is not None:
+        params["n_estimators"] = n_estimators
 
     try:
         # ── Paso 1: Conectar a DB y cargar datos ──────────────────────────────
@@ -586,6 +597,9 @@ def iniciar_entrenamiento(
     shap_top_n: int,
     state: "ModelState",
     guardar_como_activo: bool = False,
+    max_depth: int | None = None,
+    learning_rate: float | None = None,
+    n_estimators: int | None = None,
 ) -> str:
     """
     Registra y lanza un job de reentrenamiento (venta o alquiler) en background.
@@ -625,7 +639,7 @@ def iniciar_entrenamiento(
 
     thread = threading.Thread(
         target=_run_training_pipeline,
-        args=(job_id, tipo_operacion, nombre_modelo, hiperparametros, shap_top_n, state, guardar_como_activo),
+        args=(job_id, tipo_operacion, nombre_modelo, hiperparametros, shap_top_n, state, guardar_como_activo, max_depth, learning_rate, n_estimators),
         daemon=True,
         name=f"entrenamiento-{tipo_operacion}-{job_id[:8]}",
     )
@@ -641,8 +655,21 @@ def iniciar_entrenamiento_venta(
     shap_top_n: int = 10,
     state: "ModelState" | None = None,
     guardar_como_activo: bool = False,
+    max_depth: int | None = None,
+    learning_rate: float | None = None,
+    n_estimators: int | None = None,
 ) -> str:
-    return iniciar_entrenamiento("venta", nombre_modelo, hiperparametros, shap_top_n, state, guardar_como_activo)  # type: ignore[arg-type]
+    return iniciar_entrenamiento(
+        "venta",
+        nombre_modelo,
+        hiperparametros,
+        shap_top_n,
+        state,
+        guardar_como_activo,
+        max_depth=max_depth,
+        learning_rate=learning_rate,
+        n_estimators=n_estimators,
+    )  # type: ignore[arg-type]
 
 
 def iniciar_entrenamiento_alquiler(
@@ -651,5 +678,18 @@ def iniciar_entrenamiento_alquiler(
     shap_top_n: int = 10,
     state: "ModelState" | None = None,
     guardar_como_activo: bool = False,
+    max_depth: int | None = None,
+    learning_rate: float | None = None,
+    n_estimators: int | None = None,
 ) -> str:
-    return iniciar_entrenamiento("alquiler", nombre_modelo, hiperparametros, shap_top_n, state, guardar_como_activo)  # type: ignore[arg-type]
+    return iniciar_entrenamiento(
+        "alquiler",
+        nombre_modelo,
+        hiperparametros,
+        shap_top_n,
+        state,
+        guardar_como_activo,
+        max_depth=max_depth,
+        learning_rate=learning_rate,
+        n_estimators=n_estimators,
+    )  # type: ignore[arg-type]
