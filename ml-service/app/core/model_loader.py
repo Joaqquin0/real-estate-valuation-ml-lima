@@ -117,22 +117,42 @@ def _cargar_artefactos_venta(state: ModelState, model_path_override: str | None 
         with open(config_path, encoding="utf-8") as f:
             state.config = json.load(f)
 
-    config_model_file = state.config.get("modelo_archivo", "xgboost_venta_v2.pkl")
-    config_model_path = _resolver_ruta(os.path.join(models_dir, config_model_file))
-    model_path = (
-        model_path_override
-        or os.getenv("MODEL_PATH")
-        or (config_model_path if os.path.exists(config_model_path) else _resolver_ruta(os.path.join(models_dir, "xgboost_venta_v2.pkl")))
-    )
+    # 2. Intentar cargar versión Production desde MLflow Model Registry
+    from app.core.mlflow_client import mlflow_manager
+    model_name_mlflow = os.getenv("MLFLOW_MODEL_NAME_VENTA", "xgboost_venta")
+    modelo_cargado = False
 
-    if not os.path.exists(model_path):
-        raise RuntimeError(
-            f"Modelo de venta no encontrado: {model_path}\n"
-            f"Verifica que el archivo exista en {models_dir}/"
+    if not model_path_override and mlflow_manager.check_connection():
+        prod_ver = mlflow_manager.get_production_version(model_name_mlflow)
+        if prod_ver:
+            try:
+                uri = f"models:/{model_name_mlflow}/Production"
+                print(f"[ModelLoader][Venta] Cargando modelo en RAM desde MLflow: {uri} (v{prod_ver.version})...")
+                import mlflow.xgboost
+                state.modelo = mlflow.xgboost.load_model(uri)
+                modelo_cargado = True
+                state.config["modelo_version"] = f"v{prod_ver.version}_mlflow"
+                print(f"[ModelLoader][Venta] [OK] Modelo cargado desde MLflow Registry a RAM.")
+            except Exception as e:
+                print(f"[ModelLoader][Venta] Advertencia: No se pudo cargar desde MLflow ({e}). Usando fallback local...")
+
+    if not modelo_cargado:
+        config_model_file = state.config.get("modelo_archivo", "xgboost_venta_v2.pkl")
+        config_model_path = _resolver_ruta(os.path.join(models_dir, config_model_file))
+        model_path = (
+            model_path_override
+            or os.getenv("MODEL_PATH")
+            or (config_model_path if os.path.exists(config_model_path) else _resolver_ruta(os.path.join(models_dir, "xgboost_venta_v2.pkl")))
         )
-    print(f"[ModelLoader][Venta] Cargando modelo: {model_path} ...")
-    state.modelo = joblib.load(model_path)
-    print(f"[ModelLoader][Venta] [OK] Modelo cargado ({os.path.getsize(model_path) / 1e6:.1f} MB)")
+
+        if not os.path.exists(model_path):
+            raise RuntimeError(
+                f"Modelo de venta no encontrado: {model_path}\n"
+                f"Verifica que el archivo exista en {models_dir}/"
+            )
+        print(f"[ModelLoader][Venta] Cargando modelo: {model_path} ...")
+        state.modelo = joblib.load(model_path)
+        print(f"[ModelLoader][Venta] [OK] Modelo cargado ({os.path.getsize(model_path) / 1e6:.1f} MB)")
 
     print("[ModelLoader][Venta] Inicializando SHAP TreeExplainer ...")
     state.explainer = shap.TreeExplainer(state.modelo)
@@ -164,22 +184,42 @@ def _cargar_artefactos_alquiler(state: ModelState, model_path_override: str | No
         with open(config_path, encoding="utf-8") as f:
             state.config_alquiler = json.load(f)
 
-    config_model_file = state.config_alquiler.get("modelo_archivo", "xgboost_alquiler_v1.pkl")
-    config_model_path = _resolver_ruta(os.path.join(models_dir, config_model_file))
-    model_path = (
-        model_path_override
-        or os.getenv("MODEL_ALQUILER_PATH")
-        or (config_model_path if os.path.exists(config_model_path) else _resolver_ruta(os.path.join(models_dir, "xgboost_alquiler_v1.pkl")))
-    )
+    # 2. Intentar cargar versión Production desde MLflow Model Registry
+    from app.core.mlflow_client import mlflow_manager
+    model_name_mlflow = os.getenv("MLFLOW_MODEL_NAME_ALQUILER", "xgboost_alquiler")
+    modelo_cargado = False
 
-    if not os.path.exists(model_path):
-        raise RuntimeError(
-            f"Modelo de alquiler no encontrado: {model_path}\n"
-            f"Verifica que el archivo exista en {models_dir}/"
+    if not model_path_override and mlflow_manager.check_connection():
+        prod_ver = mlflow_manager.get_production_version(model_name_mlflow)
+        if prod_ver:
+            try:
+                uri = f"models:/{model_name_mlflow}/Production"
+                print(f"[ModelLoader][Alquiler] Cargando modelo en RAM desde MLflow: {uri} (v{prod_ver.version})...")
+                import mlflow.xgboost
+                state.modelo_alquiler = mlflow.xgboost.load_model(uri)
+                modelo_cargado = True
+                state.config_alquiler["modelo_version"] = f"v{prod_ver.version}_mlflow"
+                print(f"[ModelLoader][Alquiler] [OK] Modelo cargado desde MLflow Registry a RAM.")
+            except Exception as e:
+                print(f"[ModelLoader][Alquiler] Advertencia: No se pudo cargar desde MLflow ({e}). Usando fallback local...")
+
+    if not modelo_cargado:
+        config_model_file = state.config_alquiler.get("modelo_archivo", "xgboost_alquiler_v1.pkl")
+        config_model_path = _resolver_ruta(os.path.join(models_dir, config_model_file))
+        model_path = (
+            model_path_override
+            or os.getenv("MODEL_ALQUILER_PATH")
+            or (config_model_path if os.path.exists(config_model_path) else _resolver_ruta(os.path.join(models_dir, "xgboost_alquiler_v1.pkl")))
         )
-    print(f"[ModelLoader][Alquiler] Cargando modelo: {model_path} ...")
-    state.modelo_alquiler = joblib.load(model_path)
-    print(f"[ModelLoader][Alquiler] [OK] Modelo cargado ({os.path.getsize(model_path) / 1e6:.1f} MB)")
+
+        if not os.path.exists(model_path):
+            raise RuntimeError(
+                f"Modelo de alquiler no encontrado: {model_path}\n"
+                f"Verifica que el archivo exista en {models_dir}/"
+            )
+        print(f"[ModelLoader][Alquiler] Cargando modelo: {model_path} ...")
+        state.modelo_alquiler = joblib.load(model_path)
+        print(f"[ModelLoader][Alquiler] [OK] Modelo cargado ({os.path.getsize(model_path) / 1e6:.1f} MB)")
 
     print("[ModelLoader][Alquiler] Inicializando SHAP TreeExplainer ...")
     state.explainer_alquiler = shap.TreeExplainer(state.modelo_alquiler)
