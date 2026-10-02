@@ -309,16 +309,25 @@ def _run_training_pipeline(
         df_test  = _construir_features(df_test_raw)
 
         # ── Paso 3: Target Encoding del distrito ──────────────────────────────
-        _update_job(job_id, progreso=f"[3/8] Aplicando Target Encoding ({target_df_col})...")
-        print(f"[EntrenamientoService][{job_id}] Paso 3: Target Encoding...")
-
         df_train[target_df_col] = df_train_raw[target_raw_col]
         df_test[target_df_col]  = df_test_raw[target_raw_col]
+
+        if tipo_operacion == "alquiler":
+            _update_job(job_id, progreso="[3/8] Aplicando Target Encoding sobre canon por m²...")
+            print(f"[EntrenamientoService][{job_id}] Paso 3: Target Encoding bayesiano sobre canon por m² (alquiler_m2)...")
+            df_train["alquiler_m2"] = df_train[target_df_col] / df_train["Superficie"]
+            df_test["alquiler_m2"]  = df_test[target_df_col] / df_test["Superficie"]
+            col_target_te = "alquiler_m2"
+        else:
+            _update_job(job_id, progreso=f"[3/8] Aplicando Target Encoding ({target_df_col})...")
+            print(f"[EntrenamientoService][{job_id}] Paso 3: Target Encoding ({target_df_col})...")
+            col_target_te = target_df_col
 
         df_train, df_test, encoding_map, media_global = _target_encoding_distrito(
             df_train, df_test,
             col_distrito="distrito",
-            col_target=target_df_col,
+            col_target=col_target_te,
+            smoothing=10.0,
         )
 
         # ── Paso 4: Preparar X e y ────────────────────────────────────────────
