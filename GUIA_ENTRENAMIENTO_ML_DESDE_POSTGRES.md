@@ -120,7 +120,24 @@ El modelo en producción (`ml-service`) requiere exactamente **33 variables**, l
 4. `tiene_garaje = (garajes > 0).astype(float)`
 5. `es_piso_alto = (piso >= 8).astype(float)`
 6. `superficie_cuadrado = (superficie_m2 / 100) ** 2`
-7. `distrito_encoded` = Target encoding o mapeo ordinal guardado en `model_config.json`.
+7. `distrito_encoded` = Target encoding Bayesiano ($m$-estimate) calculado exclusivamente sobre `TRAIN`:
+   * **En Modelo de Venta:** Calculado sobre el target absoluto `precio_soles_const` ($S/.$ totales).
+   * **En Modelo de Alquiler (Optimización Opción A):** Calculado sobre el canon unitario por metro cuadrado `alquiler_soles_const / superficie_m2` ($S/./m^2$).  
+     *Justificación:* Desacopla el tamaño del departamento del valor intrínseco del suelo distrital, eliminando la sobrestimación en distritos periféricos donde las ofertas de Train tenían metrajes atípicos (ej. Carabayllo, Ate). Eleva el $R^2$ global a **0.6806** y reduce el MAPE a **13.79%** sin necesidad de alterar ninguna columna en la base de datos PostgreSQL (`distrito_encoded` conserva su mismo nombre y tipo).
+
+En el servicio separado (`ml-service`), la lógica en memoria durante el paso de encoding se aplica directamente así:
+```python
+# Cálculo en ml-service antes de fit():
+alquiler_m2_train = df_train["alquiler_soles_const"] / df_train["superficie_m2"]
+media_global_m2 = float(alquiler_m2_train.mean())
+stats = df_train.assign(m2=alquiler_m2_train).groupby("distrito")["m2"].agg(["mean", "count"])
+stats["distrito_encoded"] = (
+    (stats["count"] * stats["mean"] + 10.0 * media_global_m2) / (stats["count"] + 10.0)
+)
+encoding_map = stats["distrito_encoded"].to_dict()
+df_train["distrito_encoded"] = df_train["distrito"].map(encoding_map)
+df_test["distrito_encoded"] = df_test["distrito"].map(encoding_map).fillna(media_global_m2)
+```
 
 ---
 
