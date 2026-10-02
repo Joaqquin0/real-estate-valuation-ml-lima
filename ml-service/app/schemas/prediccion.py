@@ -42,10 +42,10 @@ class PrediccionVentaRequest(BaseModel):
         description="Número de habitaciones/dormitorios.",
         examples=[3],
     )
-    banios: int = Field(
-        ..., ge=1, le=15,
-        description="Número de baños.",
-        examples=[2],
+    banios: float = Field(
+        ..., ge=0.5, le=15.0,
+        description="Número de baños (admite medios baños ej: 1.5, 2.0, 2.5).",
+        examples=[2.0],
     )
     garajes: int = Field(
         default=0, ge=0, le=10,
