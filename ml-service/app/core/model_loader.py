@@ -132,6 +132,19 @@ def _cargar_artefactos_venta(state: ModelState, model_path_override: str | None 
                 state.modelo = mlflow.xgboost.load_model(uri)
                 modelo_cargado = True
                 state.config["modelo_version"] = f"v{prod_ver.version}_mlflow"
+                try:
+                    run_info = mlflow_manager.client.get_run(prod_ver.run_id)
+                    m = run_info.data.metrics
+                    if "mape_pct" in m:
+                        state.config["mape_test"] = round(m["mape_pct"], 4)
+                    if "r2" in m:
+                        state.config["r2_test"] = round(m["r2"], 4)
+                    if "mae" in m:
+                        state.config["mae_test"] = round(m["mae"], 2)
+                    if "rmse" in m:
+                        state.config["rmse_test"] = round(m["rmse"], 2)
+                except Exception as ex_m:
+                    print(f"[ModelLoader][Venta] No se pudieron sincronizar métricas de MLflow: {ex_m}")
                 print(f"[ModelLoader][Venta] [OK] Modelo cargado desde MLflow Registry a RAM.")
             except Exception as e:
                 print(f"[ModelLoader][Venta] Advertencia: No se pudo cargar desde MLflow ({e}). Usando fallback local...")
@@ -199,6 +212,19 @@ def _cargar_artefactos_alquiler(state: ModelState, model_path_override: str | No
                 state.modelo_alquiler = mlflow.xgboost.load_model(uri)
                 modelo_cargado = True
                 state.config_alquiler["modelo_version"] = f"v{prod_ver.version}_mlflow"
+                try:
+                    run_info = mlflow_manager.client.get_run(prod_ver.run_id)
+                    m = run_info.data.metrics
+                    if "mape_pct" in m:
+                        state.config_alquiler["mape_test"] = round(m["mape_pct"], 4)
+                    if "r2" in m:
+                        state.config_alquiler["r2_test"] = round(m["r2"], 4)
+                    if "mae" in m:
+                        state.config_alquiler["mae_test"] = round(m["mae"], 2)
+                    if "rmse" in m:
+                        state.config_alquiler["rmse_test"] = round(m["rmse"], 2)
+                except Exception as ex_m:
+                    print(f"[ModelLoader][Alquiler] No se pudieron sincronizar métricas de MLflow: {ex_m}")
                 print(f"[ModelLoader][Alquiler] [OK] Modelo cargado desde MLflow Registry a RAM.")
             except Exception as e:
                 print(f"[ModelLoader][Alquiler] Advertencia: No se pudo cargar desde MLflow ({e}). Usando fallback local...")

@@ -408,18 +408,11 @@ def _run_training_pipeline(
         with open(metricas_path, "w", encoding="utf-8") as f:
             json.dump(metricas_dict, f, indent=2)
 
-        # 7d. Actualizar config del modelo
-        if os.path.exists(config_path):
-            with open(config_path, encoding="utf-8") as f:
-                config_actual = json.load(f)
-        else:
-            config_actual = {}
-
+        # 7d. Exportar config del modelo
         now_utc = datetime.now(timezone.utc)
         version = nombre_modelo.split("_")[-1] if "_" in nombre_modelo else ("v2" if tipo_operacion == "venta" else "v1")
 
-        config_actualizada = {
-            **config_actual,
+        config_modelo_actual = {
             "modelo_version":  version,
             "modelo_archivo":  f"{nombre_modelo}.pkl",
             "tipo_operacion":  tipo_operacion,
@@ -438,20 +431,34 @@ def _run_training_pipeline(
             "retrained_at":    now_utc.isoformat(),
         }
 
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(config_actualizada, f, indent=2, ensure_ascii=False)
+        # Guardar siempre la configuración individual del artefacto generado
+        artefacto_config_path = os.path.join(models_dir, f"{nombre_modelo}_config.json")
+        with open(artefacto_config_path, "w", encoding="utf-8") as f:
+            json.dump(config_modelo_actual, f, indent=2, ensure_ascii=False)
 
-        # 7e. Actualizar features_metadata
-        metadata_actualizada = {
-            "target": target_df_col,
-            "features": FEATURE_COLS,
-            "encoding_map_distrito": encoding_map,
-            "media_global_target": media_global,
-            "transformacion": "log1p",
-            "updated_at": now_utc.isoformat(),
-        }
-        with open(metadata_path, "w", encoding="utf-8") as f:
-            json.dump(metadata_actualizada, f, indent=2, ensure_ascii=False)
+        # Actualizar config_path y features_metadata de producción ÚNICAMENTE si fue aprobado como activo
+        if guardar_como_activo:
+            if os.path.exists(config_path):
+                with open(config_path, encoding="utf-8") as f:
+                    config_prod = json.load(f)
+            else:
+                config_prod = {}
+
+            config_prod.update(config_modelo_actual)
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(config_prod, f, indent=2, ensure_ascii=False)
+
+            # 7e. Actualizar features_metadata
+            metadata_actualizada = {
+                "target": target_df_col,
+                "features": FEATURE_COLS,
+                "encoding_map_distrito": encoding_map,
+                "media_global_target": media_global,
+                "transformacion": "log1p",
+                "updated_at": now_utc.isoformat(),
+            }
+            with open(metadata_path, "w", encoding="utf-8") as f:
+                json.dump(metadata_actualizada, f, indent=2, ensure_ascii=False)
 
         # 7f. Registro en MLflow Tracking y Model Registry
         mlflow_run_id = None

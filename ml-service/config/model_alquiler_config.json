@@ -1,6 +1,6 @@
 {
-  "modelo_version": "test",
-  "modelo_archivo": "xgboost_alquiler_candidato_test.pkl",
+  "modelo_version": "v1",
+  "modelo_archivo": "xgboost_alquiler_v1.pkl",
   "tipo_operacion": "alquiler",
   "mape_test": 14.1763,
   "r2_test": 0.6486,

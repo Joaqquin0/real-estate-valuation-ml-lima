@@ -1,10 +1,10 @@
 {
-  "modelo_version": "v3",
-  "modelo_archivo": "xgboost_venta_candidato_v3.pkl",
-  "mape_test": 15.6804,
-  "r2_test": 0.7366,
-  "mae_test": 53964.7,
-  "rmse_test": 79757.11,
+  "modelo_version": "v2",
+  "modelo_archivo": "xgboost_venta_v2.pkl",
+  "mape_test": 15.04,
+  "r2_test": 0.7469,
+  "mae_test": 52165.93,
+  "rmse_test": 78170.0,
   "train_periodo": "2016-2023",
   "test_periodo": "2024-2025",
   "ipc_actual": {
