@@ -228,7 +228,7 @@ def _run_training_pipeline(
     # Hiperparámetros por defecto según tipo de operación
     if tipo_operacion == "venta":
         DEFAULT_PARAMS: dict[str, Any] = {
-            "n_estimators":     550,
+            "n_estimators":     650,
             "max_depth":        6,
             "learning_rate":    0.040,
             "subsample":        0.852,

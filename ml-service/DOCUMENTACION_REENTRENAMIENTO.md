@@ -84,7 +84,7 @@ Todos los endpoints administrativos están bajo el prefijo `/api/v1/admin/entren
 {
   "nombre_modelo": "xgboost_venta_v3",
   "hiperparametros": {
-    "n_estimators": 550,
+    "n_estimators": 650,
     "max_depth": 6,
     "learning_rate": 0.040,
     "subsample": 0.852,

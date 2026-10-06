@@ -62,8 +62,8 @@ class EntrenamientoBaseRequest(BaseModel):
     n_estimators: int | None = Field(
         default=None,
         ge=50, le=2000,
-        description="Cantidad de árboles. Si se omite, usa el valor óptimo validado (550 venta / 600 alquiler).",
-        examples=[550],
+        description="Cantidad de árboles. Si se omite, usa el valor óptimo validado (650 venta / 600 alquiler).",
+        examples=[650],
     )
     min_child_weight: int | None = Field(
         default=None,
