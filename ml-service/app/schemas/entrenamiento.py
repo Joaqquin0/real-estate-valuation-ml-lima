@@ -56,14 +56,14 @@ class EntrenamientoBaseRequest(BaseModel):
     learning_rate: float | None = Field(
         default=None,
         ge=0.001, le=1.0,
-        description="Tasa de aprendizaje (shrinkage). Si se omite, usa el valor óptimo validado (0.045 venta / 0.035 alquiler).",
-        examples=[0.045],
+        description="Tasa de aprendizaje (shrinkage). Si se omite, usa el valor óptimo validado (0.040 venta / 0.035 alquiler).",
+        examples=[0.040],
     )
     n_estimators: int | None = Field(
         default=None,
         ge=50, le=2000,
-        description="Cantidad de árboles. Si se omite, usa el valor óptimo validado (500 venta / 600 alquiler).",
-        examples=[500],
+        description="Cantidad de árboles. Si se omite, usa el valor óptimo validado (550 venta / 600 alquiler).",
+        examples=[550],
     )
     min_child_weight: int | None = Field(
         default=None,

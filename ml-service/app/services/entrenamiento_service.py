@@ -225,17 +225,17 @@ def _run_training_pipeline(
     """
     inicio = time.time()
 
-    # Hiperparámetros por defecto según tipo de operación (Palancas 1 y 4)
+    # Hiperparámetros por defecto según tipo de operación
     if tipo_operacion == "venta":
         DEFAULT_PARAMS: dict[str, Any] = {
-            "n_estimators":     500,
+            "n_estimators":     550,
             "max_depth":        6,
-            "learning_rate":    0.045,
-            "subsample":        0.8,
-            "colsample_bytree": 0.8,
-            "reg_alpha":        0.1,
-            "reg_lambda":       1.0,
-            "min_child_weight": 8,
+            "learning_rate":    0.040,
+            "subsample":        0.852,
+            "colsample_bytree": 0.847,
+            "reg_alpha":        4.06,
+            "reg_lambda":       0.0306,
+            "min_child_weight": 9,
             "random_state":     42,
             "n_jobs":          -1,
             "tree_method":     "hist",
@@ -362,10 +362,9 @@ def _run_training_pipeline(
         y_train = np.log1p(df_train[target_df_col].astype(float).values)
         y_test  = np.log1p(df_test[target_df_col].astype(float).values)
 
-        # Ponderación temporal de Mercado (Palanca 2):
-        # Alquiler decay = 0.85 (mercado de renta dinámico post-pandemia)
-        # Venta decay = 0.90 (prioriza ciclo reciente 2021-2023 sobre 2016-2018)
-        decay = 0.85 if tipo_operacion == "alquiler" else 0.90
+        # Ponderación temporal de Mercado:
+        # Alquiler decay = 0.85, Venta decay = 0.85 (calibrado)
+        decay = 0.85
         anio_ref = 2023
         sample_weights = df_train["Anio"].apply(lambda y: decay ** (anio_ref - y) if y <= anio_ref else 1.0).values
 
