@@ -98,6 +98,7 @@ def iniciar_entrenamiento_modelo_venta(
         max_depth=request.max_depth,
         learning_rate=request.learning_rate,
         n_estimators=request.n_estimators,
+        min_child_weight=request.min_child_weight,
     )
 
     return EntrenamientoIniciadoResponse(
@@ -145,6 +146,7 @@ def iniciar_entrenamiento_modelo_alquiler(
         max_depth=request.max_depth,
         learning_rate=request.learning_rate,
         n_estimators=request.n_estimators,
+        min_child_weight=request.min_child_weight,
     )
 
     return EntrenamientoIniciadoResponse(

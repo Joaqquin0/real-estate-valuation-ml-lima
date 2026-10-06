@@ -86,12 +86,12 @@ Todos los endpoints administrativos están bajo el prefijo `/api/v1/admin/entren
   "hiperparametros": {
     "n_estimators": 500,
     "max_depth": 6,
-    "learning_rate": 0.05,
+    "learning_rate": 0.045,
     "subsample": 0.8,
     "colsample_bytree": 0.8,
     "reg_alpha": 0.1,
     "reg_lambda": 1.0,
-    "min_child_weight": 3
+    "min_child_weight": 8
   },
   "guardar_como_activo": true
 }
@@ -124,13 +124,13 @@ Todos los endpoints administrativos están bajo el prefijo `/api/v1/admin/entren
   "nombre_modelo": "xgboost_alquiler_v2",
   "hiperparametros": {
     "n_estimators": 600,
-    "max_depth": 7,
-    "learning_rate": 0.04,
+    "max_depth": 6,
+    "learning_rate": 0.035,
     "subsample": 0.85,
     "colsample_bytree": 0.80,
     "reg_alpha": 0.1,
     "reg_lambda": 4.0,
-    "min_child_weight": 3
+    "min_child_weight": 4
   },
   "guardar_como_activo": true
 }

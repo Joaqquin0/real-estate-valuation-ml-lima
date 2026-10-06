@@ -50,20 +50,26 @@ class EntrenamientoBaseRequest(BaseModel):
     max_depth: int | None = Field(
         default=None,
         ge=3, le=15,
-        description="Profundidad máxima de los árboles. Si se omite, usa el valor óptimo validado (6 venta / 7 alquiler).",
+        description="Profundidad máxima de los árboles. Si se omite, usa el valor óptimo validado (6 venta / 6 alquiler).",
         examples=[6],
     )
     learning_rate: float | None = Field(
         default=None,
         ge=0.001, le=1.0,
-        description="Tasa de aprendizaje (shrinkage). Si se omite, usa el valor óptimo validado (0.05 venta / 0.04 alquiler).",
-        examples=[0.05],
+        description="Tasa de aprendizaje (shrinkage). Si se omite, usa el valor óptimo validado (0.045 venta / 0.035 alquiler).",
+        examples=[0.045],
     )
     n_estimators: int | None = Field(
         default=None,
         ge=50, le=2000,
         description="Cantidad de árboles. Si se omite, usa el valor óptimo validado (500 venta / 600 alquiler).",
         examples=[500],
+    )
+    min_child_weight: int | None = Field(
+        default=None,
+        ge=1, le=50,
+        description="Peso mínimo requerido en nodo hoja (Palanca 4: 8 venta / 4 alquiler).",
+        examples=[8],
     )
     hiperparametros: dict[str, Any] | None = Field(
         default=None,

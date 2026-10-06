@@ -218,23 +218,24 @@ def _run_training_pipeline(
     max_depth: int | None = None,
     learning_rate: float | None = None,
     n_estimators: int | None = None,
+    min_child_weight: int | None = None,
 ) -> None:
     """
     Pipeline completo de reentrenamiento para Venta o Alquiler.
     """
     inicio = time.time()
 
-    # Hiperparámetros por defecto según tipo de operación
+    # Hiperparámetros por defecto según tipo de operación (Palancas 1 y 4)
     if tipo_operacion == "venta":
         DEFAULT_PARAMS: dict[str, Any] = {
             "n_estimators":     500,
             "max_depth":        6,
-            "learning_rate":    0.05,
+            "learning_rate":    0.045,
             "subsample":        0.8,
             "colsample_bytree": 0.8,
             "reg_alpha":        0.1,
             "reg_lambda":       1.0,
-            "min_child_weight": 3,
+            "min_child_weight": 8,
             "random_state":     42,
             "n_jobs":          -1,
             "tree_method":     "hist",
@@ -245,16 +246,16 @@ def _run_training_pipeline(
         target_raw_col = "precio_soles_const"
         target_df_col = "Precio_Soles_Const"
     else:
-        # Alquiler — configuración validada en 03_entrenamiento_alquiler.py
+        # Alquiler — configuración validada (Palanca 1: max_depth=6, lr=0.035; Palanca 4: min_child_weight=4)
         DEFAULT_PARAMS = {
             "n_estimators":     600,
-            "max_depth":        7,
-            "learning_rate":    0.04,
+            "max_depth":        6,
+            "learning_rate":    0.035,
             "subsample":        0.85,
             "colsample_bytree": 0.80,
             "reg_alpha":        0.1,
             "reg_lambda":       4.0,
-            "min_child_weight": 3,
+            "min_child_weight": 4,
             "random_state":     42,
             "n_jobs":          -1,
             "tree_method":     "hist",
@@ -274,6 +275,8 @@ def _run_training_pipeline(
         params["learning_rate"] = learning_rate
     if n_estimators is not None:
         params["n_estimators"] = n_estimators
+    if min_child_weight is not None:
+        params["min_child_weight"] = min_child_weight
 
     try:
         # ── Paso 1: Conectar a DB y cargar datos ──────────────────────────────
@@ -359,13 +362,12 @@ def _run_training_pipeline(
         y_train = np.log1p(df_train[target_df_col].astype(float).values)
         y_test  = np.log1p(df_test[target_df_col].astype(float).values)
 
-        # Ponderación temporal E1 para alquiler (da mayor peso a transacciones recientes)
-        if tipo_operacion == "alquiler":
-            decay = 0.85
-            anio_ref = 2023
-            sample_weights = df_train["Anio"].apply(lambda y: decay ** (anio_ref - y) if y <= anio_ref else 1.0).values
-        else:
-            sample_weights = None
+        # Ponderación temporal de Mercado (Palanca 2):
+        # Alquiler decay = 0.85 (mercado de renta dinámico post-pandemia)
+        # Venta decay = 0.90 (prioriza ciclo reciente 2021-2023 sobre 2016-2018)
+        decay = 0.85 if tipo_operacion == "alquiler" else 0.90
+        anio_ref = 2023
+        sample_weights = df_train["Anio"].apply(lambda y: decay ** (anio_ref - y) if y <= anio_ref else 1.0).values
 
         # ── Paso 5: Entrenamiento XGBoost ─────────────────────────────────────
         _update_job(job_id, progreso=f"[5/8] Entrenando XGBRegressor ({tipo_operacion}, n_estimators={params.get('n_estimators', '?')})...")
@@ -616,6 +618,7 @@ def iniciar_entrenamiento(
     max_depth: int | None = None,
     learning_rate: float | None = None,
     n_estimators: int | None = None,
+    min_child_weight: int | None = None,
 ) -> str:
     """
     Registra y lanza un job de reentrenamiento (venta o alquiler) en background.
@@ -655,7 +658,7 @@ def iniciar_entrenamiento(
 
     thread = threading.Thread(
         target=_run_training_pipeline,
-        args=(job_id, tipo_operacion, nombre_modelo, hiperparametros, shap_top_n, state, guardar_como_activo, max_depth, learning_rate, n_estimators),
+        args=(job_id, tipo_operacion, nombre_modelo, hiperparametros, shap_top_n, state, guardar_como_activo, max_depth, learning_rate, n_estimators, min_child_weight),
         daemon=True,
         name=f"entrenamiento-{tipo_operacion}-{job_id[:8]}",
     )
@@ -674,6 +677,7 @@ def iniciar_entrenamiento_venta(
     max_depth: int | None = None,
     learning_rate: float | None = None,
     n_estimators: int | None = None,
+    min_child_weight: int | None = None,
 ) -> str:
     return iniciar_entrenamiento(
         "venta",
@@ -685,6 +689,7 @@ def iniciar_entrenamiento_venta(
         max_depth=max_depth,
         learning_rate=learning_rate,
         n_estimators=n_estimators,
+        min_child_weight=min_child_weight,
     )  # type: ignore[arg-type]
 
 
@@ -697,6 +702,7 @@ def iniciar_entrenamiento_alquiler(
     max_depth: int | None = None,
     learning_rate: float | None = None,
     n_estimators: int | None = None,
+    min_child_weight: int | None = None,
 ) -> str:
     return iniciar_entrenamiento(
         "alquiler",
@@ -708,4 +714,5 @@ def iniciar_entrenamiento_alquiler(
         max_depth=max_depth,
         learning_rate=learning_rate,
         n_estimators=n_estimators,
+        min_child_weight=min_child_weight,
     )  # type: ignore[arg-type]
