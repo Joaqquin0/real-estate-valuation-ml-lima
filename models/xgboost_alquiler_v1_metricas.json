@@ -30,6 +30,22 @@
   },
   "median_ratio_crudo": 0.996,
   "median_ratio_calibrado": 1.0,
+  "cod_pct": 13.73,
+  "cov_pct": 19.68,
+  "prd": 1.037,
+  "prb": -0.1121,
+  "iaao": {
+    "median_ratio": 1.0,
+    "mean_ratio": 1.0096,
+    "weighted_mean_ratio": 0.9735,
+    "cod_pct": 13.73,
+    "cov_pct": 19.68,
+    "prd": 1.037,
+    "prb": -0.1121,
+    "cumple_iaao_cod": true,
+    "cumple_iaao_nivel": true,
+    "cumple_iaao_prd": false
+  },
   "n_train": 41921,
   "n_test": 19682,
   "supera_benchmark": true

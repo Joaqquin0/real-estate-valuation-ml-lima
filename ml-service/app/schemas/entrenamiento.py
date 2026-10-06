@@ -145,18 +145,40 @@ class EntrenamientoIniciadoResponse(BaseModel):
 
 # ─── RESPONSE — Estado del Job ────────────────────────────────────────────────
 
+class MetricasIAAO(BaseModel):
+    """Métricas oficiales de valuación masiva IAAO (Standard on Ratio Studies 2013/2020)."""
+    median_ratio: float = Field(description="Mediana del ratio de tasación (tilde{R}). Objetivo: 1.00 (0.90 - 1.10).")
+    mean_ratio: float = Field(description="Media aritmética simple de los ratios (bar{R}).")
+    weighted_mean_ratio: float = Field(description="Media ponderada por volumen monetario (bar{R}_w).")
+    cod_pct: float = Field(description="Coeficiente de Dispersión en porcentaje (COD <= 15.0% para áreas heterogéneas).")
+    cov_pct: float = Field(description="Coeficiente de Variación paramétrico en porcentaje (COV).")
+    prd: float = Field(description="Diferencial Relacionado con el Precio (PRD). Rango admisible: 0.98 - 1.03.")
+    prb: float = Field(description="Sesgo Relacionado con el Precio (PRB). Rango admisible: -0.05 a +0.05.")
+    cumple_iaao_cod: bool = Field(description="True si COD <= 15.0%.")
+    cumple_iaao_nivel: bool = Field(description="True si 0.90 <= Median Ratio <= 1.10.")
+    cumple_iaao_prd: bool = Field(description="True si 0.98 <= PRD <= 1.03.")
+
+
 class MetricasEntrenamiento(BaseModel):
     """Métricas calculadas sobre el test set tras el reentrenamiento."""
+    model_config = {"extra": "ignore"}
+
     mae: float | None = Field(default=None, description="Error Absoluto Medio (Soles Constantes).")
     rmse: float | None = Field(default=None, description="Raíz del Error Cuadrático Medio.")
     mape_pct: float | None = Field(default=None, description="MAPE en el test set (porcentaje).")
     r2: float | None = Field(default=None, description="Coeficiente de Determinación R².")
+    cod_pct: float | None = Field(default=None, description="Coeficiente de Dispersión IAAO (%).")
+    cov_pct: float | None = Field(default=None, description="Coeficiente de Variación paramétrico (%).")
+    prd: float | None = Field(default=None, description="Price-Related Differential IAAO.")
+    prb: float | None = Field(default=None, description="Price-Related Bias IAAO.")
+    median_ratio_calibrado: float | None = Field(default=None, description="Mediana del ratio tras calibración.")
     n_train: int | None = Field(default=None, description="Registros usados en entrenamiento.")
     n_test: int | None = Field(default=None, description="Registros usados en evaluación test.")
     supera_benchmark: bool | None = Field(
         default=None,
         description="True si el MAPE es menor al benchmark (15.0% para venta, 17.89% para alquiler).",
     )
+    iaao: MetricasIAAO | None = Field(default=None, description="Métricas oficiales de valuación masiva IAAO.")
 
 
 class ArtifactosGenerados(BaseModel):

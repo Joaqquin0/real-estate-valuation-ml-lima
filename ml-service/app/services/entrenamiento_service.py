@@ -203,6 +203,66 @@ def _calcular_metricas(
     return {"mae": mae, "rmse": rmse, "mape_pct": mape, "r2": r2}
 
 
+def _calcular_metricas_iaao(
+    y_real_orig: np.ndarray,
+    y_pred_orig: np.ndarray,
+) -> dict[str, Any]:
+    """
+    Calcula el conjunto estándar de métricas de valuación masiva de la IAAO
+    (Standard on Ratio Studies 2013/2020):
+    - median_ratio: Nivel de evaluación (tilde{R}), objetivo 1.00 (0.90 - 1.10).
+    - mean_ratio: Media aritmética de los ratios (bar{R}).
+    - weighted_mean_ratio: Media ponderada por valor en dinero (bar{R}_w).
+    - cod_pct: Coeficiente de Dispersión (COD <= 15.0% para áreas heterogéneas).
+    - cov_pct: Coeficiente de Variación paramétrico (desv. estándar / media * 100).
+    - prd: Diferencial Relacionado con el Precio (bar{R} / bar{R}_w, objetivo 0.98 - 1.03).
+    - prb: Sesgo Relacionado con el Precio (regresión ponderada, objetivo -0.05 a +0.05).
+    """
+    y_real = np.asarray(y_real_orig, dtype=float)
+    y_pred = np.asarray(y_pred_orig, dtype=float)
+    ratios = y_pred / (y_real + 1e-8)
+
+    median_r = float(np.median(ratios))
+    mean_r = float(np.mean(ratios))
+    sum_real = float(np.sum(y_real))
+    weighted_mean_r = float(np.sum(y_pred) / (sum_real + 1e-8)) if sum_real > 0 else 1.0
+
+    # COD (Coefficient of Dispersion): (AAD / median_r) * 100
+    aad = float(np.mean(np.abs(ratios - median_r)))
+    cod_pct = float((aad / (median_r + 1e-8)) * 100.0)
+
+    # COV (Coefficient of Variation): (std / mean_r) * 100
+    std_r = float(np.std(ratios))
+    cov_pct = float((std_r / (mean_r + 1e-8)) * 100.0)
+
+    # PRD (Price-Related Differential): mean_r / weighted_mean_r
+    prd = float(mean_r / (weighted_mean_r + 1e-8))
+
+    # PRB (Price-Related Bias): regresión lineal de sesgo por valor según estándar IAAO
+    proxy_val = 0.5 * (y_pred / (median_r + 1e-8)) + 0.5 * y_real
+    pct_diff = (ratios - median_r) / (median_r + 1e-8)
+    log2_val = np.log2(np.maximum(proxy_val, 1.0))
+    var_x = float(np.var(log2_val))
+    if var_x > 1e-8:
+        cov_xy = float(np.cov(log2_val, pct_diff)[0, 1])
+        prb = float(cov_xy / var_x)
+    else:
+        prb = 0.0
+
+    return {
+        "median_ratio": round(median_r, 4),
+        "mean_ratio": round(mean_r, 4),
+        "weighted_mean_ratio": round(weighted_mean_r, 4),
+        "cod_pct": round(cod_pct, 2),
+        "cov_pct": round(cov_pct, 2),
+        "prd": round(prd, 4),
+        "prb": round(prb, 4),
+        "cumple_iaao_cod": bool(cod_pct <= 15.0),
+        "cumple_iaao_nivel": bool(0.90 <= median_r <= 1.10),
+        "cumple_iaao_prd": bool(0.98 <= prd <= 1.03),
+    }
+
+
 # ─── Pipeline principal (se ejecuta en background thread) ─────────────────────
 
 def _run_training_pipeline(
@@ -425,11 +485,17 @@ def _run_training_pipeline(
         factores_vector = df_test_raw["distrito"].map(factores_distrito).fillna(factor_usado_global).values
         y_pred_calibrado = pred_total_raw / factores_vector
 
+        metricas_iaao = _calcular_metricas_iaao(y_real_test, y_pred_calibrado)
         metricas_dict = _calcular_metricas(y_real_test, y_pred_calibrado)
         metricas_dict["factor_calibracion_iaao"] = factor_usado_global
         metricas_dict["factores_calibracion_distrito"] = factores_distrito
         metricas_dict["median_ratio_crudo"] = round(median_ratio_global, 4)
-        metricas_dict["median_ratio_calibrado"] = round(float(np.median(y_pred_calibrado / (y_real_test + 1e-8))), 4)
+        metricas_dict["median_ratio_calibrado"] = metricas_iaao["median_ratio"]
+        metricas_dict["cod_pct"] = metricas_iaao["cod_pct"]
+        metricas_dict["cov_pct"] = metricas_iaao["cov_pct"]
+        metricas_dict["prd"] = metricas_iaao["prd"]
+        metricas_dict["prb"] = metricas_iaao["prb"]
+        metricas_dict["iaao"] = metricas_iaao
         metricas_dict["n_train"] = len(X_train)
         metricas_dict["n_test"]  = len(X_test)
         metricas_dict["supera_benchmark"] = metricas_dict["mape_pct"] < benchmark_mape
@@ -437,7 +503,10 @@ def _run_training_pipeline(
         print(
             f"[EntrenamientoService][{job_id}] Metricas ({tipo_operacion}): "
             f"MAPE={metricas_dict['mape_pct']:.2f}% | R2={metricas_dict['r2']:.4f} | "
-            f"Ratio Crudo={metricas_dict['median_ratio_crudo']} -> Calibrado={metricas_dict['median_ratio_calibrado']} (Estratificado por {len(factores_distrito)} distritos)"
+            f"COD={metricas_iaao['cod_pct']:.2f}% | COV={metricas_iaao['cov_pct']:.2f}% | "
+            f"PRD={metricas_iaao['prd']:.4f} | PRB={metricas_iaao['prb']:.4f} | "
+            f"Ratio Crudo={metricas_dict['median_ratio_crudo']} -> Calibrado={metricas_iaao['median_ratio']} "
+            f"(Estratificado por {len(factores_distrito)} distritos)"
         )
 
         # ── Paso 7: Exportar artefactos ───────────────────────────────────────
@@ -478,6 +547,11 @@ def _run_training_pipeline(
             "r2_test":         round(metricas_dict["r2"], 4),
             "mae_test":        round(metricas_dict["mae"], 2),
             "rmse_test":       round(metricas_dict["rmse"], 2),
+            "cod_iaao":        metricas_iaao["cod_pct"],
+            "cov_iaao":        metricas_iaao["cov_pct"],
+            "prd_iaao":        metricas_iaao["prd"],
+            "prb_iaao":        metricas_iaao["prb"],
+            "iaao":            metricas_iaao,
             "n_features":      len(FEATURE_COLS),
             "feature_cols":    FEATURE_COLS,
             "encoding_map_distrito": encoding_map,
@@ -548,6 +622,10 @@ def _run_training_pipeline(
                         "r2": float(metricas_dict["r2"]),
                         "mae": float(metricas_dict["mae"]),
                         "rmse": float(metricas_dict["rmse"]),
+                        "cod_pct": float(metricas_iaao["cod_pct"]),
+                        "cov_pct": float(metricas_iaao["cov_pct"]),
+                        "prd": float(metricas_iaao["prd"]),
+                        "prb": float(metricas_iaao["prb"]),
                         "median_ratio_crudo": float(metricas_dict["median_ratio_crudo"]),
                         "median_ratio_calibrado": float(metricas_dict["median_ratio_calibrado"]),
                         "factor_calibracion": float(factor_usado_global),
@@ -559,6 +637,9 @@ def _run_training_pipeline(
                     mlflow.set_tag("nombre_modelo", nombre_modelo)
                     mlflow.set_tag("target_tipo", "m2" if usar_target_m2 else "total")
                     mlflow.set_tag("calibracion_iaao", str(factor_usado_global != 1.0))
+                    mlflow.set_tag("cumple_iaao_cod", str(metricas_iaao["cumple_iaao_cod"]))
+                    mlflow.set_tag("cumple_iaao_nivel", str(metricas_iaao["cumple_iaao_nivel"]))
+                    mlflow.set_tag("cumple_iaao_prd", str(metricas_iaao["cumple_iaao_prd"]))
                     mlflow.set_tag("estado_gobernanza", "production" if guardar_como_activo else "candidate")
                     mlflow.set_tag("benchmark_superado", str(metricas_dict.get("supera_benchmark", False)))
 
