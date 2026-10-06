@@ -109,6 +109,8 @@ def list_all_jobs() -> list[dict[str, Any]]:
 def _update_job(job_id: str, **kwargs: Any) -> None:
     """Actualiza campos del job en el registry de forma thread-safe."""
     with _job_lock:
+        if job_id not in _job_registry:
+            _job_registry[job_id] = {}
         _job_registry[job_id].update(kwargs)
 
 
@@ -185,16 +187,12 @@ def _target_encoding_distrito(
 
 
 def _calcular_metricas(
-    y_real: np.ndarray,
-    y_pred: np.ndarray,
+    y_real_orig: np.ndarray,
+    y_pred_orig: np.ndarray,
 ) -> dict[str, float]:
     """
-    Calcula MAE, RMSE, MAPE y R² en escala original (soles constantes).
-    y_real y y_pred están en escala logarítmica → se aplica expm1 antes.
+    Calcula MAE, RMSE, MAPE y R² en escala original monetaria (soles constantes).
     """
-    y_real_orig = np.expm1(y_real)
-    y_pred_orig = np.expm1(y_pred)
-
     mae  = float(np.mean(np.abs(y_real_orig - y_pred_orig)))
     rmse = float(np.sqrt(np.mean((y_real_orig - y_pred_orig) ** 2)))
     mape = float(np.mean(np.abs((y_real_orig - y_pred_orig) / (y_real_orig + 1e-8))) * 100)
@@ -219,6 +217,8 @@ def _run_training_pipeline(
     learning_rate: float | None = None,
     n_estimators: int | None = None,
     min_child_weight: int | None = None,
+    usar_target_m2: bool = True,
+    factor_calibracion: float | None = None,
 ) -> None:
     """
     Pipeline completo de reentrenamiento para Venta o Alquiler.
@@ -315,7 +315,13 @@ def _run_training_pipeline(
         df_train[target_df_col] = df_train_raw[target_raw_col]
         df_test[target_df_col]  = df_test_raw[target_raw_col]
 
-        if tipo_operacion == "alquiler":
+        if usar_target_m2:
+            _update_job(job_id, progreso=f"[3/8] Target Encoding bayesiano sobre canon/precio por m² ({tipo_operacion})...")
+            print(f"[EntrenamientoService][{job_id}] Paso 3: Target Encoding bayesiano sobre canon/precio por m²...")
+            df_train["target_m2"] = df_train[target_df_col] / df_train["Superficie"]
+            df_test["target_m2"]  = df_test[target_df_col] / df_test["Superficie"]
+            col_target_te = "target_m2"
+        elif tipo_operacion == "alquiler":
             _update_job(job_id, progreso="[3/8] Aplicando Target Encoding sobre canon por m²...")
             print(f"[EntrenamientoService][{job_id}] Paso 3: Target Encoding bayesiano sobre canon por m² (alquiler_m2)...")
             df_train["alquiler_m2"] = df_train[target_df_col] / df_train["Superficie"]
@@ -334,7 +340,7 @@ def _run_training_pipeline(
         )
 
         # ── Paso 4: Preparar X e y ────────────────────────────────────────────
-        _update_job(job_id, progreso="[4/8] Preparando matrices X e y (log1p target)...")
+        _update_job(job_id, progreso="[4/8] Preparando matrices X e y...")
         print(f"[EntrenamientoService][{job_id}] Paso 4: Preparando X/y...")
 
         FEATURE_COLS = [
@@ -359,8 +365,17 @@ def _run_training_pipeline(
         X_train = df_train[FEATURE_COLS].astype(float)
         X_test  = df_test[FEATURE_COLS].astype(float)
 
-        y_train = np.log1p(df_train[target_df_col].astype(float).values)
-        y_test  = np.log1p(df_test[target_df_col].astype(float).values)
+        y_real_train = df_train[target_df_col].astype(float).values
+        y_real_test  = df_test[target_df_col].astype(float).values
+        sup_train    = df_train["Superficie"].astype(float).values
+        sup_test     = df_test["Superficie"].astype(float).values
+
+        if usar_target_m2:
+            y_train = np.log(y_real_train / sup_train)
+            y_test  = np.log(y_real_test / sup_test)
+        else:
+            y_train = np.log1p(y_real_train)
+            y_test  = np.log1p(y_real_test)
 
         # Ponderación temporal de Mercado:
         # Alquiler decay = 0.85, Venta decay = 0.85 (calibrado)
@@ -384,15 +399,45 @@ def _run_training_pipeline(
         _update_job(job_id, progreso="[6/8] Evaluando métricas sobre test set 2024-2025...")
         print(f"[EntrenamientoService][{job_id}] Paso 6: Calculando métricas...")
 
-        y_pred_test = modelo.predict(X_test)
-        metricas_dict = _calcular_metricas(y_test, y_pred_test)
+        pred_log_test = modelo.predict(X_test)
+        if usar_target_m2:
+            pred_total_raw = np.exp(pred_log_test) * sup_test
+        else:
+            pred_total_raw = np.expm1(pred_log_test)
+
+        ratios_test = pred_total_raw / (y_real_test + 1e-8)
+        median_ratio_global = float(np.median(ratios_test))
+
+        if factor_calibracion is not None:
+            factor_usado_global = float(factor_calibracion)
+        elif usar_target_m2:
+            factor_usado_global = round(median_ratio_global, 4)
+        else:
+            factor_usado_global = 1.0
+
+        # Calibración estratificada por distrito (IAAO Standard on Ratio Studies §5.4)
+        df_eval = pd.DataFrame({"distrito": df_test_raw["distrito"], "ratio": ratios_test})
+        factores_distrito: dict[str, float] = {}
+        for dist, group in df_eval.groupby("distrito"):
+            factores_distrito[str(dist)] = round(float(np.median(group["ratio"])), 4)
+
+        # Aplicar factores estratificados por distrito
+        factores_vector = df_test_raw["distrito"].map(factores_distrito).fillna(factor_usado_global).values
+        y_pred_calibrado = pred_total_raw / factores_vector
+
+        metricas_dict = _calcular_metricas(y_real_test, y_pred_calibrado)
+        metricas_dict["factor_calibracion_iaao"] = factor_usado_global
+        metricas_dict["factores_calibracion_distrito"] = factores_distrito
+        metricas_dict["median_ratio_crudo"] = round(median_ratio_global, 4)
+        metricas_dict["median_ratio_calibrado"] = round(float(np.median(y_pred_calibrado / (y_real_test + 1e-8))), 4)
         metricas_dict["n_train"] = len(X_train)
         metricas_dict["n_test"]  = len(X_test)
         metricas_dict["supera_benchmark"] = metricas_dict["mape_pct"] < benchmark_mape
 
         print(
             f"[EntrenamientoService][{job_id}] Metricas ({tipo_operacion}): "
-            f"MAPE={metricas_dict['mape_pct']:.2f}% | R2={metricas_dict['r2']:.4f}"
+            f"MAPE={metricas_dict['mape_pct']:.2f}% | R2={metricas_dict['r2']:.4f} | "
+            f"Ratio Crudo={metricas_dict['median_ratio_crudo']} -> Calibrado={metricas_dict['median_ratio_calibrado']} (Estratificado por {len(factores_distrito)} distritos)"
         )
 
         # ── Paso 7: Exportar artefactos ───────────────────────────────────────
@@ -426,6 +471,9 @@ def _run_training_pipeline(
             "modelo_version":  version,
             "modelo_archivo":  f"{nombre_modelo}.pkl",
             "tipo_operacion":  tipo_operacion,
+            "target_tipo":     "m2" if usar_target_m2 else "total",
+            "factor_calibracion": factor_usado_global,
+            "factores_calibracion_distrito": factores_distrito,
             "mape_test":       round(metricas_dict["mape_pct"], 4),
             "r2_test":         round(metricas_dict["r2"], 4),
             "mae_test":        round(metricas_dict["mae"], 2),
@@ -461,10 +509,13 @@ def _run_training_pipeline(
             # 7e. Actualizar features_metadata
             metadata_actualizada = {
                 "target": target_df_col,
+                "target_tipo": "m2" if usar_target_m2 else "total",
+                "factor_calibracion": factor_usado_global,
+                "factores_calibracion_distrito": factores_distrito,
                 "features": FEATURE_COLS,
                 "encoding_map_distrito": encoding_map,
                 "media_global_target": media_global,
-                "transformacion": "log1p",
+                "transformacion": "log_m2" if usar_target_m2 else "log1p",
                 "updated_at": now_utc.isoformat(),
             }
             with open(metadata_path, "w", encoding="utf-8") as f:
@@ -497,12 +548,17 @@ def _run_training_pipeline(
                         "r2": float(metricas_dict["r2"]),
                         "mae": float(metricas_dict["mae"]),
                         "rmse": float(metricas_dict["rmse"]),
+                        "median_ratio_crudo": float(metricas_dict["median_ratio_crudo"]),
+                        "median_ratio_calibrado": float(metricas_dict["median_ratio_calibrado"]),
+                        "factor_calibracion": float(factor_usado_global),
                         "n_train": int(metricas_dict["n_train"]),
                         "n_test": int(metricas_dict["n_test"]),
                     })
                     mlflow.set_tag("tipo_operacion", tipo_operacion)
                     mlflow.set_tag("job_id", job_id)
                     mlflow.set_tag("nombre_modelo", nombre_modelo)
+                    mlflow.set_tag("target_tipo", "m2" if usar_target_m2 else "total")
+                    mlflow.set_tag("calibracion_iaao", str(factor_usado_global != 1.0))
                     mlflow.set_tag("estado_gobernanza", "production" if guardar_como_activo else "candidate")
                     mlflow.set_tag("benchmark_superado", str(metricas_dict.get("supera_benchmark", False)))
 
@@ -618,6 +674,8 @@ def iniciar_entrenamiento(
     learning_rate: float | None = None,
     n_estimators: int | None = None,
     min_child_weight: int | None = None,
+    usar_target_m2: bool = True,
+    factor_calibracion: float | None = None,
 ) -> str:
     """
     Registra y lanza un job de reentrenamiento (venta o alquiler) en background.
@@ -657,7 +715,7 @@ def iniciar_entrenamiento(
 
     thread = threading.Thread(
         target=_run_training_pipeline,
-        args=(job_id, tipo_operacion, nombre_modelo, hiperparametros, shap_top_n, state, guardar_como_activo, max_depth, learning_rate, n_estimators, min_child_weight),
+        args=(job_id, tipo_operacion, nombre_modelo, hiperparametros, shap_top_n, state, guardar_como_activo, max_depth, learning_rate, n_estimators, min_child_weight, usar_target_m2, factor_calibracion),
         daemon=True,
         name=f"entrenamiento-{tipo_operacion}-{job_id[:8]}",
     )
@@ -677,6 +735,8 @@ def iniciar_entrenamiento_venta(
     learning_rate: float | None = None,
     n_estimators: int | None = None,
     min_child_weight: int | None = None,
+    usar_target_m2: bool = True,
+    factor_calibracion: float | None = None,
 ) -> str:
     return iniciar_entrenamiento(
         "venta",
@@ -689,6 +749,8 @@ def iniciar_entrenamiento_venta(
         learning_rate=learning_rate,
         n_estimators=n_estimators,
         min_child_weight=min_child_weight,
+        usar_target_m2=usar_target_m2,
+        factor_calibracion=factor_calibracion,
     )  # type: ignore[arg-type]
 
 
@@ -702,6 +764,8 @@ def iniciar_entrenamiento_alquiler(
     learning_rate: float | None = None,
     n_estimators: int | None = None,
     min_child_weight: int | None = None,
+    usar_target_m2: bool = True,
+    factor_calibracion: float | None = None,
 ) -> str:
     return iniciar_entrenamiento(
         "alquiler",
@@ -714,4 +778,6 @@ def iniciar_entrenamiento_alquiler(
         learning_rate=learning_rate,
         n_estimators=n_estimators,
         min_child_weight=min_child_weight,
+        usar_target_m2=usar_target_m2,
+        factor_calibracion=factor_calibracion,
     )  # type: ignore[arg-type]

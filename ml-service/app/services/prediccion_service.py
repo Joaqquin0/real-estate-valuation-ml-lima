@@ -193,10 +193,19 @@ def _predecir_generico(
 
     X = pd.DataFrame([fila])[feature_cols]
 
-    # 4. Predicción (log1p -> escala original)
+    # 4. Predicción (soporte target_m2 y calibración estratificada IAAO)
+    target_tipo = config.get("target_tipo", "total")
+    factores_distrito = config.get("factores_calibracion_distrito", {})
+    factor_calibracion = float(factores_distrito.get(req.distrito, config.get("factor_calibracion", 1.0)))
+
     try:
-        pred_log = modelo.predict(X)[0]
-        pred_const = np.expm1(pred_log)
+        pred_log = float(modelo.predict(X)[0])
+        if target_tipo == "m2":
+            pred_m2_const = float(np.exp(pred_log) / factor_calibracion)
+            pred_const = float(pred_m2_const * sup)
+        else:
+            pred_const = float(np.expm1(pred_log) / factor_calibracion)
+            pred_m2_const = float(pred_const / sup)
     except Exception as exc:
         raise HTTPException(
             status_code=500,
@@ -264,7 +273,11 @@ def _predecir_generico(
 
     # 9. Valor base SHAP
     base_log = float(explainer.expected_value)
-    base_const = math.expm1(base_log) if not math.isnan(base_log) else media_global
+    if target_tipo == "m2":
+        base_m2_const = float(math.exp(base_log) / factor_calibracion) if not math.isnan(base_log) else media_global
+        base_const = float(base_m2_const * sup)
+    else:
+        base_const = float(math.expm1(base_log) / factor_calibracion) if not math.isnan(base_log) else media_global
 
     # 10. Armar response
     return PrediccionVentaResponse(

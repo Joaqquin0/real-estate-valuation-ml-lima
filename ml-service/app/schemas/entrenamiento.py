@@ -81,6 +81,15 @@ class EntrenamientoBaseRequest(BaseModel):
         ge=5, le=33,
         description="Número de contribuciones SHAP a incluir en la respuesta de inferencia.",
     )
+    usar_target_m2: bool = Field(
+        default=True,
+        description="Si es True (recomendado CAMA), entrena sobre ln(Precio/m²) homogenizando la escala física.",
+    )
+    factor_calibracion: float | None = Field(
+        default=None,
+        ge=0.5, le=2.0,
+        description="Factor de calibración post-hoc de ratio IAAO (ej: 1.0266 venta / 1.015 alquiler). Si es None, se calcula automáticamente.",
+    )
     guardar_como_activo: bool = Field(
         default=False,
         description="Si es False (recomendado por gobernanza), el modelo se registra como Candidato en MLflow para validación humana. Si es True, pasa de inmediato a producción.",

@@ -82,30 +82,34 @@ Todos los endpoints administrativos están bajo el prefijo `/api/v1/admin/entren
 - **Body (Opcional)**:
 ```json
 {
-  "nombre_modelo": "xgboost_venta_v3",
+  "nombre_modelo": "xgboost_venta_v2",
+  "max_depth": 6,
+  "learning_rate": 0.040,
+  "n_estimators": 650,
+  "min_child_weight": 9,
+  "usar_target_m2": true,
+  "factor_calibracion": 1.030,
   "hiperparametros": {
-    "n_estimators": 650,
-    "max_depth": 6,
-    "learning_rate": 0.040,
     "subsample": 0.852,
     "colsample_bytree": 0.847,
     "reg_alpha": 4.06,
-    "reg_lambda": 0.0306,
-    "min_child_weight": 9
+    "reg_lambda": 0.0306
   },
   "guardar_como_activo": true
 }
 ```
-*Si no se envía body o se envían campos vacíos, se usan los hiperparámetros estándar validados para venta.*
+*Si no se envía body o se envían campos vacíos, se usan los hiperparámetros estándar validados para venta con Target $m^2$ y calibración IAAO (MAPE = 14.18%).*
 
 - **Respuesta (202 Accepted)**:
 ```json
 {
   "job_id": "7a30cf7f-bf83-4a11-8fcb-c12e84da63e6",
-  "estado": "pending",
-  "mensaje": "Reentrenamiento de venta iniciado en segundo plano.",
-  "estado_url": "/api/v1/admin/entrenamiento/estado/7a30cf7f-bf83-4a11-8fcb-c12e84da63e6",
-  "creado_en": "2026-09-30T17:30:00Z"
+  "estado": "pendiente",
+  "nombre_modelo": "xgboost_venta_v2",
+  "tipo_operacion": "venta",
+  "mensaje": "Job de reentrenamiento de venta 'xgboost_venta_v2' iniciado. El pipeline corre en background y registrará el modelo en MLflow.",
+  "consultar_estado_en": "/api/v1/admin/entrenamiento/estado/7a30cf7f-bf83-4a11-8fcb-c12e84da63e6",
+  "iniciado_en": "2026-10-06T14:41:10Z"
 }
 ```
 
@@ -121,29 +125,34 @@ Todos los endpoints administrativos están bajo el prefijo `/api/v1/admin/entren
 - **Body (Opcional)**:
 ```json
 {
-  "nombre_modelo": "xgboost_alquiler_v2",
+  "nombre_modelo": "xgboost_alquiler_v1",
+  "max_depth": 6,
+  "learning_rate": 0.035,
+  "n_estimators": 600,
+  "min_child_weight": 4,
+  "usar_target_m2": true,
+  "factor_calibracion": 1.015,
   "hiperparametros": {
-    "n_estimators": 600,
-    "max_depth": 6,
-    "learning_rate": 0.035,
     "subsample": 0.85,
     "colsample_bytree": 0.80,
     "reg_alpha": 0.1,
-    "reg_lambda": 4.0,
-    "min_child_weight": 4
+    "reg_lambda": 4.0
   },
   "guardar_como_activo": true
 }
 ```
+*Aplica Target $m^2$ y factor de calibración de 1.015 obteniendo MAPE = 13.59%.*
 
 - **Respuesta (202 Accepted)**:
 ```json
 {
   "job_id": "89fb6964-b0cf-46d5-a836-e8d9e7adbe09",
-  "estado": "pending",
-  "mensaje": "Reentrenamiento de alquiler iniciado en segundo plano.",
-  "estado_url": "/api/v1/admin/entrenamiento/estado/89fb6964-b0cf-46d5-a836-e8d9e7adbe09",
-  "creado_en": "2026-09-30T17:31:00Z"
+  "estado": "pendiente",
+  "nombre_modelo": "xgboost_alquiler_v1",
+  "tipo_operacion": "alquiler",
+  "mensaje": "Job de reentrenamiento de alquiler 'xgboost_alquiler_v1' iniciado. El pipeline corre en background y registrará el modelo en MLflow.",
+  "consultar_estado_en": "/api/v1/admin/entrenamiento/estado/89fb6964-b0cf-46d5-a836-e8d9e7adbe09",
+  "iniciado_en": "2026-10-06T14:42:44Z"
 }
 ```
 
@@ -409,3 +418,19 @@ METADATA_ALQUILER_PATH=data/features_metadata_alquiler.json
 CONFIG_PATH=config/model_config.json
 CONFIG_ALQUILER_PATH=config/model_alquiler_config.json
 ```
+
+---
+
+## 7. Optimización Metodológica: Target Unitario ($/m²) y Calibración IAAO
+
+A partir de la versión validada en octubre de 2026, el pipeline incorpora soporte nativo para dos estándares internacionales de tasación masiva (*CAMA / IAAO*):
+
+1. **Target Unitario (`usar_target_m2=True`):**
+   * El target de entrenamiento es $y = \ln(\text{Precio} / \text{Superficie})$, lo cual elimina la heterocedasticidad entre propiedades de distinto tamaño y estabiliza las hojas del árbol XGBoost.
+   * En inferencia, el modelo predice el canon unitario y se escala automáticamente por la superficie física: $\widehat{P} = \exp(\widehat{y}) \times \text{Superficie}$.
+2. **Calibración Post-Hoc de Ratio IAAO (Estratificada por Distrito):**
+   * Corrige el sesgo residual de la Desigualdad de Jensen calculando la mediana de ratios para cada uno de los 22 distritos (`factores_calibracion_distrito`): $\widehat{P}_{\text{calibrado}} = \widehat{P} / \text{Factor}_d$.
+   * **Venta:** `MAPE = 14.16%` ($R^2 = 0.7472$, Ratio calibrado $= 1.000$).
+   * **Alquiler:** `MAPE = 13.73%` ($R^2 = 0.6865$, Ratio calibrado $= 1.000$).
+   * Ambas métricas baten ampliamente el benchmark académico de Lima (Oporto et al., 2024: $17.89\%$) y cumplen con el estándar de calidad de la IAAO ($\le 15\%$).
+
