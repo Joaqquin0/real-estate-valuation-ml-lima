@@ -47,6 +47,7 @@ from app.core.model_loader import cargar_modelo, liberar_recursos, model_state
 from app.routers import entrenamiento as entrenamiento_router
 from app.routers import health as health_router
 from app.routers import modelos as modelos_router
+from app.routers import monitoreo as monitoreo_router
 from app.routers import prediccion as prediccion_router
 
 
@@ -129,3 +130,4 @@ app.include_router(health_router.router)
 app.include_router(prediccion_router.router)
 app.include_router(entrenamiento_router.router)
 app.include_router(modelos_router.router)
+app.include_router(monitoreo_router.router)

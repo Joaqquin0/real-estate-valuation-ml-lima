@@ -99,3 +99,26 @@ def promover_modelo(
         motivo=request.motivo,
         state=model_state,
     )
+
+
+@router.post(
+    "/rollback",
+    response_model=PromoverModeloResponse,
+    summary="Revertir / Rollback del modelo en Producción a una versión archivada",
+    description=(
+        "Acción de gobernanza de reversión: restaura una versión previa archivada a Producción.\n\n"
+        "1. MLflow transiciona la versión objetivo a 'Production' y archiva la versión actual.\n"
+        "2. Recarga en caliente el artefacto y TreeExplainer en memoria RAM sin downtime."
+    ),
+)
+def rollback_modelo(
+    request: PromoverModeloRequest,
+    _: None = Depends(_verificar_admin_token),
+) -> PromoverModeloResponse:
+    motivo = request.motivo or f"Rollback preventivo a versión {request.version}."
+    return promover_modelo_a_produccion(
+        tipo_operacion=request.tipo_operacion,
+        version=request.version,
+        motivo=motivo,
+        state=model_state,
+    )
