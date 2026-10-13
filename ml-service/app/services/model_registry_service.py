@@ -14,6 +14,7 @@ Funcionalidades:
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Literal
 
@@ -104,10 +105,12 @@ def _build_version_info(
 def obtener_benchmark(
     tipo_operacion: Literal["venta", "alquiler"],
     state: "ModelState",
+    version_candidato: str | None = None,
+    solo_ultimo: bool = True,
 ) -> BenchmarkResponse:
     """
-    Construye la comparativa completa de benchmark entre la versión de producción
-    activa en RAM y las versiones candidatas registradas en MLflow.
+    Construye la comparativa de benchmark entre la versión de producción
+    activa en RAM y la versión candidata (o candidatas activas) registradas en MLflow.
     """
     model_name = _get_model_name(tipo_operacion)
     benchmark_mape = BENCHMARKS_MAPE.get(tipo_operacion, 15.0)
@@ -145,17 +148,24 @@ def obtener_benchmark(
             fuente_artefacto="memoria_activa",
         )
 
-    # 2. Obtener versiones candidatas (no Production)
+    # 2. Obtener versión(es) candidata(s) activas (excluye Production y Archived)
     candidatos_evaluados: list[ComparativaCandidato] = []
 
     if mlflow_manager.check_connection():
-        candidates = mlflow_manager.get_latest_candidate_versions(model_name, limit=5)
+        candidates: list[Any] = []
+        if version_candidato:
+            specific_ver = mlflow_manager.get_model_version(model_name, version_candidato)
+            if specific_ver:
+                candidates = [specific_ver]
+        else:
+            limit = 1 if solo_ultimo else 5
+            candidates = mlflow_manager.get_latest_candidate_versions(model_name, limit=limit)
 
         for cand_ver in candidates:
             cand_info = _build_version_info(
                 model_name=model_name,
                 version=cand_ver.version,
-                stage="Candidate",
+                stage=cand_ver.current_stage or "Candidate",
                 run_id=cand_ver.run_id,
                 tags=getattr(cand_ver, "tags", {}),
                 created_at_timestamp=getattr(cand_ver, "creation_timestamp", None),
@@ -272,18 +282,18 @@ def obtener_historial_versiones(
 
 def promover_modelo_a_produccion(
     tipo_operacion: Literal["venta", "alquiler"],
-    version: str | int,
+    version: str | int | None,
     motivo: str,
     state: "ModelState",
 ) -> PromoverModeloResponse:
     """
-    1. Promueve la versión solicitada en MLflow Model Registry a stage 'Production'.
+    1. Promueve la versión solicitada (o el último candidato activo si version es None)
+       en MLflow Model Registry a stage 'Production'.
     2. Descarga el modelo directamente desde MLflow a la memoria RAM.
     3. Reconstruye el SHAP TreeExplainer en RAM.
     4. Actualiza atómicamente el ModelState global (Hot-Reload sin downtime).
     """
     model_name = _get_model_name(tipo_operacion)
-    version_str = str(version)
 
     if not mlflow_manager.check_connection():
         raise HTTPException(
@@ -294,9 +304,38 @@ def promover_modelo_a_produccion(
             },
         )
 
-    # Identificar versión anterior en producción para archivar
+    # Sanitizar versión: extraer dígitos si vienen letras o prefijos
+    version_digits = None
+    if version is not None:
+        v_raw = str(version).strip()
+        m = re.search(r"\d+", v_raw)
+        if m:
+            version_digits = m.group(0)
+
+    # Si no vino número de versión o vino un placeholder sin dígitos (ej: 'string', null)
+    if not version_digits:
+        candidates = mlflow_manager.get_latest_candidate_versions(model_name, limit=1)
+        if not candidates:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "error": "sin_candidatos",
+                    "message": f"No se encontró ninguna versión candidata activa pendiente de aprobación para '{model_name}'.",
+                },
+            )
+        version_str = str(candidates[0].version)
+    else:
+        version_str = version_digits
+
+    # Identificar versión anterior en producción para archivar y calcular deltas
     prod_anterior = mlflow_manager.get_production_version(model_name)
     ver_anterior_str = prod_anterior.version if prod_anterior else None
+    info_anterior = _build_version_info(
+        model_name=model_name,
+        version=prod_anterior.version,
+        stage="Production",
+        run_id=prod_anterior.run_id,
+    ) if prod_anterior else None
 
     # 1. Promover en MLflow
     try:
@@ -351,6 +390,34 @@ def promover_modelo_a_produccion(
             },
         )
 
+    # 4. Obtener métricas de la nueva versión y calcular deltas frente a la anterior
+    ver_nueva = mlflow_manager.get_model_version(model_name, version_str)
+    info_nueva = _build_version_info(
+        model_name=model_name,
+        version=version_str,
+        stage="Production",
+        run_id=ver_nueva.run_id if ver_nueva else None,
+    ) if ver_nueva else None
+
+    deltas = None
+    if info_nueva and info_anterior and ver_anterior_str != version_str:
+        m_new = info_nueva.metricas
+        m_old = info_anterior.metricas
+
+        delta_mape = round(m_new.mape_pct - m_old.mape_pct, 4) if (m_new.mape_pct is not None and m_old.mape_pct is not None) else None
+        delta_r2 = round(m_new.r2 - m_old.r2, 4) if (m_new.r2 is not None and m_old.r2 is not None) else None
+        delta_mae = round(m_new.mae - m_old.mae, 2) if (m_new.mae is not None and m_old.mae is not None) else None
+        delta_rmse = round(m_new.rmse - m_old.rmse, 2) if (m_new.rmse is not None and m_old.rmse is not None) else None
+
+        deltas = DeltaMetricas(
+            delta_mape_pct=delta_mape,
+            delta_r2=delta_r2,
+            delta_mae=delta_mae,
+            delta_rmse=delta_rmse,
+            mejora_mape=delta_mape is not None and delta_mape < 0,
+            mejora_r2=delta_r2 is not None and delta_r2 > 0,
+        )
+
     return PromoverModeloResponse(
         exito=True,
         mensaje=f"Modelo {model_name} v{version_str} promovido exitosamente a Producción y cargado en memoria RAM.",
@@ -358,4 +425,49 @@ def promover_modelo_a_produccion(
         version_promovida=version_str,
         version_anterior_archivada=ver_anterior_str,
         modelo_cargado_en_ram=True,
+        metricas=info_nueva.metricas if info_nueva else None,
+        metricas_anteriores=info_anterior.metricas if info_anterior else None,
+        deltas=deltas,
+    )
+
+
+def ejecutar_rollback(
+    tipo_operacion: Literal["venta", "alquiler"],
+    version: str | int | None,
+    motivo: str | None,
+    state: "ModelState",
+) -> PromoverModeloResponse:
+    """
+    Restaura una versión archivada previa a Producción.
+    Si 'version' no se especifica o no contiene dígitos (ej. el placeholder 'string' de Swagger),
+    revierte automáticamente a la versión anterior inmediata en estado Archived.
+    """
+    model_name = _get_model_name(tipo_operacion)
+    target_version = None
+
+    if version is not None:
+        v_str = str(version).strip()
+        m = re.search(r"\d+", v_str)
+        if m:
+            target_version = m.group(0)
+
+    # Si no se pasó un número de versión válido, buscar la versión archivada más reciente
+    if not target_version:
+        archived_ver = mlflow_manager.get_latest_archived_version(model_name)
+        if not archived_ver:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "error": "sin_version_archivada",
+                    "message": f"No se encontró ninguna versión archivada previa de '{model_name}' a la cual revertir.",
+                },
+            )
+        target_version = str(archived_ver.version)
+
+    motivo_final = motivo or f"Rollback preventivo a versión {target_version}."
+    return promover_modelo_a_produccion(
+        tipo_operacion=tipo_operacion,
+        version=target_version,
+        motivo=motivo_final,
+        state=state,
     )

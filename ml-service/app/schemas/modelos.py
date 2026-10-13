@@ -98,8 +98,9 @@ class PromoverModeloRequest(BaseModel):
     tipo_operacion: Literal["venta", "alquiler"] = Field(
         description="Tipo de modelo a promover ('venta' o 'alquiler')",
     )
-    version: str | int = Field(
-        description="Número de versión candidata a promover (ej: '2')",
+    version: str | int | None = Field(
+        default=None,
+        description="Número de versión candidata a promover (opcional). Si se omite o es null, promueve automáticamente el último candidato.",
     )
     motivo: str = Field(
         default="Aprobación manual del administrador tras verificación de benchmark",
@@ -108,11 +109,14 @@ class PromoverModeloRequest(BaseModel):
 
 
 class PromoverModeloResponse(BaseModel):
-    """Respuesta tras promover exitosamente un modelo a Producción."""
+    """Respuesta tras promover exitosamente un modelo a Producción o realizar rollback."""
     exito: bool = True
     mensaje: str
     tipo_operacion: str
     version_promovida: str
     version_anterior_archivada: str | None = None
     modelo_cargado_en_ram: bool = True
+    metricas: MetricasModelo | None = Field(default=None, description="Métricas del modelo ahora activo en producción")
+    metricas_anteriores: MetricasModelo | None = Field(default=None, description="Métricas de la versión previamente activa")
+    deltas: DeltaMetricas | None = Field(default=None, description="Diferencias relativas (ΔMAPE, ΔR², mejora_mape)")
     promovido_en: datetime = Field(default_factory=datetime.utcnow)

@@ -95,23 +95,59 @@ class MLflowManager:
 
     def get_latest_candidate_versions(self, model_name: str, limit: int = 5) -> list[ModelVersion]:
         """
-        Retorna las versiones candidatas más recientes (stage 'None' o 'Staging')
+        Retorna las versiones candidatas activas (excluyendo 'Production' y 'Archived')
         para evaluación y benchmarking.
         """
         try:
-            # Buscar versiones del modelo registradas
+            # Buscar versiones del modelo registradas ordenadas descendentemente
             filter_str = f"name = '{model_name}'"
             all_versions = self.client.search_model_versions(
                 filter_string=filter_str,
                 order_by=["version_number DESC"],
-                max_results=limit,
+                max_results=max(limit * 3, 20),
             )
-            # Filtrar las que no son Production
-            candidates = [v for v in all_versions if v.current_stage != "Production"]
-            return candidates
+            # Filtrar estrictamente las candidatas activas (no Production ni Archived)
+            candidates = [
+                v for v in all_versions
+                if v.current_stage not in ("Production", "Archived")
+            ]
+            return candidates[:limit]
         except Exception as e:
             print(f"[MLflowManager] Error buscando versiones candidatas de '{model_name}': {e}")
             return []
+
+    def get_model_version(self, model_name: str, version: str | int) -> ModelVersion | None:
+        """
+        Obtiene una versión específica de un modelo en Model Registry.
+        """
+        try:
+            v_str = str(version).strip()
+            import re
+            m = re.search(r"\d+", v_str)
+            if m:
+                v_str = m.group(0)
+            return self.client.get_model_version(model_name, v_str)
+        except Exception as e:
+            print(f"[MLflowManager] Error consultando versión {version} de '{model_name}': {e}")
+            return None
+
+    def get_latest_archived_version(self, model_name: str) -> ModelVersion | None:
+        """
+        Retorna la versión archivada más reciente para operaciones de Rollback automático.
+        """
+        try:
+            filter_str = f"name = '{model_name}'"
+            all_versions = self.client.search_model_versions(
+                filter_string=filter_str,
+                order_by=["version_number DESC"],
+            )
+            for v in all_versions:
+                if v.current_stage == "Archived":
+                    return v
+            return None
+        except Exception as e:
+            print(f"[MLflowManager] Error buscando versión archivada de '{model_name}': {e}")
+            return None
 
     def get_run_metrics_and_params(self, run_id: str) -> dict[str, Any]:
         """
@@ -139,7 +175,12 @@ class MLflowManager:
         Promueve una versión candidata a 'Production', asigna el alias 'champion',
         archiva la versión previa y registra los tags de auditoría.
         """
-        version_str = str(version)
+        version_str = str(version).strip()
+        import re
+        m = re.search(r"\d+", version_str)
+        if m:
+            version_str = m.group(0)
+
         print(f"[MLflowManager] Promoviendo {model_name} v{version_str} a Production...")
 
         # 1. Asignar stage Production en Model Registry

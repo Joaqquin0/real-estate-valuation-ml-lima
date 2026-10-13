@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
 from app.core.model_loader import model_state
 from app.schemas.modelos import (
@@ -22,6 +22,7 @@ from app.schemas.modelos import (
     PromoverModeloResponse,
 )
 from app.services.model_registry_service import (
+    ejecutar_rollback,
     obtener_benchmark,
     obtener_historial_versiones,
     promover_modelo_a_produccion,
@@ -55,14 +56,27 @@ def _verificar_admin_token(x_admin_token: str | None = Header(None)) -> None:
     description=(
         "Compara las métricas del modelo actualmente en producción (y memoria RAM) "
         "contra las versiones candidatas registradas en MLflow tras los reentrenamientos.\n\n"
-        "Calcula diferencias relativas (ΔMAPE, ΔR²) y genera dictamen automático de aprobación."
+        "Por defecto compara únicamente contra el candidato activo más reciente (o una versión específica si se provee)."
     ),
 )
 def get_benchmark(
     tipo_operacion: Literal["venta", "alquiler"],
+    version: str | None = Query(
+        default=None,
+        description="Versión candidata específica a comparar (ej. '8'). Si no se indica, compara el candidato más reciente.",
+    ),
+    solo_ultimo: bool = Query(
+        default=True,
+        description="Si es True (default), compara únicamente contra el último candidato activo. Si es False, lista hasta 5 candidatos activos.",
+    ),
     _: None = Depends(_verificar_admin_token),
 ) -> BenchmarkResponse:
-    return obtener_benchmark(tipo_operacion=tipo_operacion, state=model_state)
+    return obtener_benchmark(
+        tipo_operacion=tipo_operacion,
+        state=model_state,
+        version_candidato=version,
+        solo_ultimo=solo_ultimo,
+    )
 
 
 @router.get(
@@ -115,10 +129,9 @@ def rollback_modelo(
     request: PromoverModeloRequest,
     _: None = Depends(_verificar_admin_token),
 ) -> PromoverModeloResponse:
-    motivo = request.motivo or f"Rollback preventivo a versión {request.version}."
-    return promover_modelo_a_produccion(
+    return ejecutar_rollback(
         tipo_operacion=request.tipo_operacion,
         version=request.version,
-        motivo=motivo,
+        motivo=request.motivo,
         state=model_state,
     )
