@@ -24,3 +24,5 @@ otebooks/07_validacion_prediccion.py para verificar coherencia de predicciones.
 - El MAPE del modelo (14.88%) NO cambia al actualizar el IPC — fue calculado en soles constantes.
 - El IPC actualizado solo afecta el precio mostrado al usuario final (soles nominales).
 - Para reproducibilidad de la tesis: el valor canónico es 169.18 (Q1-2026). Ver Sec. 6.6.E.4 de DOCUMENTACION_MODELO_TESIS.md.
+| 2026-10-13 | 2026-Q2 | 169.18 → 169.5 | 1.695 | INEI/BCRP — serie PN01270PM, Base Dic 2009 = 100 | Joaquin Cortez |
+| 2026-10-13 | 2026-Q1 | 169.5 → 169.18 | 1.6918 | INEI/BCRP — serie PN01270PM, Base Dic 2009 = 100 | Joaquin Cortez |

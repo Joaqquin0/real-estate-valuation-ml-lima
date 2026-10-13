@@ -151,11 +151,11 @@ def _cargar_artefactos_venta(state: ModelState, model_path_override: str | None 
 
     if not modelo_cargado:
         config_model_file = state.config.get("modelo_archivo", "xgboost_venta_v2.pkl")
-        config_model_path = _resolver_ruta(os.path.join(models_dir, config_model_file))
-        model_path = (
+        model_path = _resolver_ruta(
             model_path_override
             or os.getenv("MODEL_PATH")
-            or (config_model_path if os.path.exists(config_model_path) else _resolver_ruta(os.path.join(models_dir, "xgboost_venta_v2.pkl")))
+            or os.path.join(models_dir, config_model_file)
+            or "models/xgboost_venta_v2.pkl"
         )
 
         if not os.path.exists(model_path):
@@ -231,11 +231,11 @@ def _cargar_artefactos_alquiler(state: ModelState, model_path_override: str | No
 
     if not modelo_cargado:
         config_model_file = state.config_alquiler.get("modelo_archivo", "xgboost_alquiler_v1.pkl")
-        config_model_path = _resolver_ruta(os.path.join(models_dir, config_model_file))
-        model_path = (
+        model_path = _resolver_ruta(
             model_path_override
             or os.getenv("MODEL_ALQUILER_PATH")
-            or (config_model_path if os.path.exists(config_model_path) else _resolver_ruta(os.path.join(models_dir, "xgboost_alquiler_v1.pkl")))
+            or os.path.join(models_dir, config_model_file)
+            or "models/xgboost_alquiler_v1.pkl"
         )
 
         if not os.path.exists(model_path):

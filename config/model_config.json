@@ -27,7 +27,9 @@
     "valor": 169.18,
     "periodo": "2026-Q1",
     "fuente": "INEI/BCRP — serie PN01270PM, Base Dic 2009 = 100",
-    "nota": "Actualizar este valor al cierre de cada trimestre sin necesidad de redespliegue"
+    "nota": "Restaurado a valor canónico de tesis Q1-2026",
+    "fecha_actualizacion": "2026-10-13T17:15:05.701979",
+    "actualizado_por": "Joaquin Cortez"
   },
   "n_features": 33,
   "target": "Precio_Soles_Const",

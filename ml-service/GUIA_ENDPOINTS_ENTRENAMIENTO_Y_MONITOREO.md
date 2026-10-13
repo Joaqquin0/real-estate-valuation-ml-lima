@@ -684,6 +684,88 @@ Prefijo: `/api/v1/admin/modelos`
 
 ---
 
+### 5.7. Gestión Dinámica del Factor IPC (Actualización en Caliente — Zero Downtime)
+
+El modelo de Machine Learning predice en **Soles Constantes (Base Dic-2009=100)** para aislar la inflación de la plusvalía inmobiliaria real. Para presentar el precio en **Soles Nominales de hoy**, se multiplica por el factor de conversión ($\text{IPC} / 100$). Estos endpoints permiten consultar y actualizar el factor macroeconómico en tiempo real sin reiniciar el microservicio ni reentrenar el modelo.
+
+#### A. Consultar Factor IPC Vigente
+- **Método / Ruta:** `GET /api/v1/admin/config/ipc`
+- **Descripción:** Retorna el factor IPC activo en memoria RAM, el desglose para venta y alquiler, y la fundamentación econométrica.
+- **Respuesta (HTTP 200 OK):**
+```json
+{
+  "ipc_vigente": {
+    "valor": 169.18,
+    "factor": 1.6918,
+    "periodo": "2026-Q1",
+    "fuente": "INEI/BCRP — serie PN01270PM, Base Dic 2009 = 100",
+    "nota": "Actualizar este valor al cierre de cada trimestre sin necesidad de redespliegue",
+    "fecha_actualizacion": "2026-08-01T00:00:00Z"
+  },
+  "modelo_venta": {
+    "valor": 169.18,
+    "periodo": "2026-Q1",
+    "fuente": "INEI/BCRP — serie PN01270PM, Base Dic 2009 = 100",
+    "nota": "Actualizar este valor al cierre de cada trimestre sin necesidad de redespliegue"
+  },
+  "modelo_alquiler": {
+    "valor": 169.18,
+    "periodo": "2026-Q1",
+    "fuente": "INEI/BCRP - serie PN01270PM, Base Dic 2009 = 100",
+    "nota": "Actualizar este valor al cierre de cada trimestre sin necesidad de redespliegue"
+  },
+  "explicacion_macroeconomica": "Los modelos predictivos (XGBoost) entrenan y evalúan sobre Soles Constantes (Base Dic-2009=100) para aislar la inflación de la plusvalía física y distrital. El factor IPC (valor/100) convierte dicho valor intrínseco en Soles Nominales vigentes para el usuario final."
+}
+```
+
+#### B. Actualizar Factor IPC en Caliente
+- **Método / Ruta:** `PUT /api/v1/admin/config/ipc`
+- **Descripción:**
+  1. Aplica el nuevo factor en la **memoria RAM** de `ml-service` de inmediato (*Zero Downtime*). A partir de ese momento, todas las nuevas inferencias nominales usan el nuevo valor.
+  2. Persiste la configuración en `config/model_config.json` y `config/model_alquiler_config.json`.
+  3. Registra una nueva línea en la bitácora de auditoría macroeconómica `config/ipc_changelog.md`.
+- **Request Body:**
+```json
+{
+  "valor": 169.50,
+  "periodo": "2026-Q2",
+  "fuente": "INEI/BCRP — serie PN01270PM, Base Dic 2009 = 100",
+  "actualizado_por": "Joaquín Cortez",
+  "nota": "Ajuste trimestral por publicación oficial del BCRP para 2026-Q2",
+  "aplicar_a": "ambos"
+}
+```
+*(Valores de `aplicar_a`: `"ambos"`, `"venta"`, `"alquiler"`).*
+
+- **Respuesta (HTTP 200 OK):**
+```json
+{
+  "exito": true,
+  "mensaje": "Factor IPC actualizado exitosamente a 169.5 (2026-Q2) para: venta, alquiler. Inferencia nominal actualizada en caliente.",
+  "ipc_previo": {
+    "valor": 169.18,
+    "periodo": "2026-Q1",
+    "fuente": "INEI/BCRP — serie PN01270PM, Base Dic 2009 = 100"
+  },
+  "ipc_nuevo": {
+    "valor": 169.5,
+    "factor": 1.695,
+    "periodo": "2026-Q2",
+    "fuente": "INEI/BCRP — serie PN01270PM, Base Dic 2009 = 100",
+    "nota": "Ajuste trimestral por publicación oficial del BCRP para 2026-Q2",
+    "fecha_actualizacion": "2026-10-13T17:15:03.637364"
+  },
+  "modelos_actualizados": [
+    "venta",
+    "alquiler"
+  ],
+  "recargado_en_ram": true,
+  "persistencia_disco": true
+}
+```
+
+---
+
 ## 6. Diccionario de Métricas Oficiales: ML Clásico vs Normas IAAO
 
 Para construir la interfaz y la lógica de validación en el Backend, este es el significado exacto de las métricas generadas:
@@ -836,6 +918,35 @@ public record ModeloDetalleDTO(
     @JsonProperty("run_id") String runId,
     @JsonProperty("metricas") MetricasSummaryDTO metricas,
     @JsonProperty("creado_en") String creadoEn
+) {}
+
+// 4. Gestión Dinámica del Factor IPC
+public record ActualizarIPCRequestDTO(
+    @JsonProperty("valor") Double valor,           // ej: 169.50
+    @JsonProperty("periodo") String periodo,       // ej: "2026-Q2"
+    @JsonProperty("fuente") String fuente,         // Opcional
+    @JsonProperty("actualizado_por") String actualizadoPor, // ej: "Admin"
+    @JsonProperty("nota") String nota,             // Opcional
+    @JsonProperty("aplicar_a") String aplicarA     // "ambos" | "venta" | "alquiler"
+) {}
+
+public record ActualizarIPCResponseDTO(
+    @JsonProperty("exito") Boolean exito,
+    @JsonProperty("mensaje") String mensaje,
+    @JsonProperty("ipc_previo") Map<String, Object> ipcPrevio,
+    @JsonProperty("ipc_nuevo") IPCDetalleDTO ipcNuevo,
+    @JsonProperty("modelos_actualizados") List<String> modelosActualizados,
+    @JsonProperty("recargado_en_ram") Boolean recargadoEnRam,
+    @JsonProperty("persistencia_disco") Boolean persistenciaDisco
+) {}
+
+public record IPCDetalleDTO(
+    @JsonProperty("valor") Double valor,
+    @JsonProperty("factor") Double factor,         // valor / 100
+    @JsonProperty("periodo") String periodo,
+    @JsonProperty("fuente") String fuente,
+    @JsonProperty("nota") String nota,
+    @JsonProperty("fecha_actualizacion") String fechaActualizacion
 ) {}
 ```
 

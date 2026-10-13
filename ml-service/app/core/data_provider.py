@@ -118,7 +118,7 @@ class PostgreSQLContextProvider(IContextDataProvider):
             "port":     port     or int(os.getenv("DB_PORT", "5432")),
             "dbname":   db_name  or os.getenv("DB_NAME", "inmobiliaria_ml_db"),
             "user":     user     or os.getenv("DB_USER", "postgres"),
-            "password": password or os.getenv("DB_PASSWORD", ""),
+            "password": password or os.getenv("DB_PASSWORD") or "5432",
         }
         self._contexto: dict[str, dict] = {}
         self._cargar()
