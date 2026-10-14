@@ -50,6 +50,7 @@ from app.routers import health as health_router
 from app.routers import modelos as modelos_router
 from app.routers import monitoreo as monitoreo_router
 from app.routers import prediccion as prediccion_router
+from app.routers import sensibilidad as sensibilidad_router
 
 
 
@@ -133,3 +134,4 @@ app.include_router(entrenamiento_router.router)
 app.include_router(modelos_router.router)
 app.include_router(monitoreo_router.router)
 app.include_router(configuracion_router.router)
+app.include_router(sensibilidad_router.router)

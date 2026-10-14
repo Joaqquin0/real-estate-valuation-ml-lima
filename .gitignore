@@ -6,3 +6,5 @@ TI_cortez_antigravity.md
 .env
 *.env
 __pycache__/
+docs
+models

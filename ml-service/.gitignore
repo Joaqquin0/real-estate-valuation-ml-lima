@@ -2,7 +2,7 @@
 models/*.pkl
 models/*.json
 data/*.csv
-data/*.json
+#data/*.json
 data/*.xlsx
 
 # Entorno Python

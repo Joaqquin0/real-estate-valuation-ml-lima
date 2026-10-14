@@ -224,8 +224,7 @@ def _predecir_generico(
             detail=f"Error calculando SHAP values de {tipo}: {exc}",
         ) from exc
 
-    # 6. Top N contribuciones SHAP
-    n_top: int = config.get("shap_top_n", 10)
+    # 6. SHAP contribuciones: Todas las features del modelo ordenadas por magnitud
     feature_names = feature_cols
     fila_vals = X.iloc[0].to_dict()
 
@@ -235,10 +234,26 @@ def _predecir_generico(
         reverse=True,
     )
 
+    total_abs_shap = sum(abs(float(sv)) for sv in shap_arr)
+    if total_abs_shap < 1e-9:
+        total_abs_shap = 1.0
+
     contribuciones: list[ContribucionFeature] = []
-    for idx, sv in indexed[:n_top]:
+    for idx, sv in indexed:
         fname = feature_names[idx]
         fval  = float(fila_vals.get(fname, 0.0))
+        abs_sv = abs(float(sv))
+        p_pct = round((abs_sv / total_abs_shap) * 100.0, 1)
+
+        if p_pct >= 20.0:
+            nivel = "Impacto Muy Alto"
+        elif p_pct >= 10.0:
+            nivel = "Impacto Alto"
+        elif p_pct >= 5.0:
+            nivel = "Impacto Moderado"
+        else:
+            nivel = "Impacto Leve"
+
         contribuciones.append(
             ContribucionFeature(
                 feature=fname,
@@ -250,8 +265,16 @@ def _predecir_generico(
                     else "negativo" if sv < -1e-6
                     else "neutro"
                 ),
+                peso_porcentaje=p_pct,
+                nivel_impacto=nivel,
             )
         )
+
+    # Ajuste de redondeo para que la suma total sea exactamente 100.0%
+    if contribuciones:
+        diff_total = round(100.0 - sum(c.peso_porcentaje for c in contribuciones), 1)
+        if abs(diff_total) > 0:
+            contribuciones[0].peso_porcentaje = round(contribuciones[0].peso_porcentaje + diff_total, 1)
 
     # 7. Conversión a soles nominales
     ipc_cfg = config.get("ipc_actual", {"valor": 169.18, "periodo": "2026-Q1"})

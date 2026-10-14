@@ -78,7 +78,6 @@ class PrediccionVentaRequest(BaseModel):
         description="Trimestre para la predicción (opcional, 1–4). Si se omite, el backend lo calcula automáticamente con la fecha actual.",
         examples=[None],
     )
-
     @field_validator("distrito")
     @classmethod
     def distrito_no_vacio(cls, v: str) -> str:
@@ -159,30 +158,38 @@ class ContribucionFeature(BaseModel):
     impacto: Literal["positivo", "negativo", "neutro"] = Field(
         description="Dirección del impacto de esta variable en el precio."
     )
+    peso_porcentaje: float = Field(
+        description="Porcentaje relativo de peso sobre el 100% total del impacto del modelo. "
+                    "La suma de peso_porcentaje de todas las variables es exactamente 100.0%."
+    )
+    nivel_impacto: str = Field(
+        description="Categoría cualitativa: 'Impacto Muy Alto' (≥20%), 'Impacto Alto' (10-19.9%), 'Impacto Moderado' (5-9.9%), 'Impacto Leve' (<5%)."
+    )
 
 
 class Explicabilidad(BaseModel):
     """
     Explicación SHAP de la predicción individual.
-    Permite al frontend renderizar un gráfico de barras de contribución.
+    Retorna la totalidad de variables del modelo ordenadas por magnitud de impacto para almacenamiento en BD y consumo del backend.
     """
     valor_base_constantes: float = Field(
         description="Precio base del modelo (media global de entrenamiento en Soles Constantes). "
                     "Punto de partida antes de aplicar las contribuciones de cada variable."
     )
     contribuciones: list[ContribucionFeature] = Field(
-        description="Top N features ordenadas por |shap_value| descendente. "
-                    "La suma de todos los shap_values + valor_base ≈ log(precio_constantes)."
+        description="Lista completa de las features del modelo ordenadas por |shap_value| descendente "
+                    "para almacenamiento en BD y decisión de visualización en el backend."
     )
     n_features_mostradas: int = Field(
-        description="Número de features incluidas en esta respuesta (top N por impacto absoluto)."
+        description="Número de features en contribuciones (todas las variables del modelo)."
     )
     n_features_total: int = Field(
+        default=33,
         description="Número total de features del modelo (33)."
     )
     nota: str = Field(
         default="Los shap_values están en escala logarítmica (transformación log1p del target). "
-                "Para impacto en soles nominales: exp(shap_value) × (IPC/100).",
+                "'peso_porcentaje' suma exactamente 100.0% entre la totalidad de variables del modelo.",
         description="Nota metodológica sobre la escala de los valores SHAP."
     )
 

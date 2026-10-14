@@ -84,9 +84,10 @@ Documentación interactiva: http://localhost:8000/docs
 
 ## Endpoints Principales
 
-### 1. Inferencia
+### 1. Inferencia y Pantalla Principal (Públicos)
 - **`POST /api/v1/prediccion/venta`**: Predice precio de venta de un inmueble (soles constantes y nominales, intervalo de confianza ±15.04%, explicabilidad SHAP).
 - **`POST /api/v1/prediccion/alquiler`**: Predice canon de arrendamiento mensual (soles constantes y nominales, intervalo de confianza ±13.85%, explicabilidad SHAP).
+- **`GET /api/v1/modelos/sensibilidad-factores`**: Análisis de sensibilidad de macro-factores del modelo para la pantalla principal (Home / Landing Page). Admite `?tipo_operacion=venta` o `alquiler`.
 - **`GET /api/v1/distritos`**: Lista los 22 distritos disponibles de Lima Metropolitana.
 - **`GET /health`**: Health check para balanceadores.
 
@@ -137,23 +138,46 @@ Documentación interactiva: http://localhost:8000/docs
     "valor_base_constantes": 432295.69,
     "contribuciones": [
       {
-        "feature": "Superficie",
-        "label": "Superficie (75.0 m²)",
-        "shap_value": 0.312,
-        "valor_feature": 75.0,
-        "impacto": "positivo"
-      },
-      {
         "feature": "distrito_encoded",
         "label": "Distrito (San Miguel)",
         "shap_value": -0.198,
         "valor_feature": 287982.23,
-        "impacto": "negativo"
-      }
+        "impacto": "negativo",
+        "peso_porcentaje": 31.2,
+        "nivel_impacto": "Impacto Muy Alto"
+      },
+      {
+        "feature": "Superficie",
+        "label": "Superficie (75.0 m²)",
+        "shap_value": 0.165,
+        "valor_feature": 75.0,
+        "impacto": "positivo",
+        "peso_porcentaje": 12.8,
+        "nivel_impacto": "Impacto Alto"
+      },
+      {
+        "feature": "pct_NSE_A",
+        "label": "NSE A en zona",
+        "shap_value": 0.082,
+        "valor_feature": 1205.5,
+        "impacto": "positivo",
+        "peso_porcentaje": 7.7,
+        "nivel_impacto": "Impacto Moderado"
+      },
+      {
+        "feature": "Antiguedad",
+        "label": "Antigüedad (8 años)",
+        "shap_value": -0.063,
+        "valor_feature": 8.0,
+        "impacto": "negativo",
+        "peso_porcentaje": 4.7,
+        "nivel_impacto": "Impacto Leve"
+      },
+      "... [33 variables en total para persistencia en BD; la suma de peso_porcentaje es 100.0%]"
     ],
-    "n_features_mostradas": 10,
+    "n_features_mostradas": 33,
     "n_features_total": 33,
-    "nota": "Los shap_values están en escala logarítmica..."
+    "nota": "'peso_porcentaje' suma exactamente 100.0% entre la totalidad de variables del modelo."
   },
   "modelo": {
     "version": "v2",
@@ -181,15 +205,105 @@ Documentación interactiva: http://localhost:8000/docs
 
 ## ¿Cómo usa el frontend los valores SHAP?
 
-El campo `explicabilidad.contribuciones` está ordenado por `|shap_value|` descendente.
-Cada item tiene todo lo necesario para renderizar un gráfico de barras horizontal:
+El campo `explicabilidad.contribuciones` está ordenado por `|shap_value|` descendente y contiene la **totalidad de las 33 variables del modelo** para persistencia íntegra en la base de datos del backend.
 
-- `label`: texto para el eje Y
-- `shap_value`: magnitud de la barra (escala log)
-- `impacto`: color de la barra (`positivo` → verde/rojo según convención)
+Cada item incluye:
+- **`feature`**: Nombre técnico interno de la feature (ej: `distrito_encoded`, `Superficie`, `pct_NSE_A`).
+- **`label`**: Texto legible para la interfaz de usuario (ej: `Distrito (San Miguel)`, `Superficie (75.0 m²)`).
+- **`shap_value`**: Magnitud del impacto en escala logarítmica (escala interna de entrenamiento).
+- **`valor_feature`**: Valor real de la característica para el inmueble evaluado.
+- **`impacto`**: Dirección del impacto (`positivo` → empuja el precio hacia arriba; `negativo` → hacia abajo; `neutro`).
+- **`peso_porcentaje`**: Peso relativo de la variable sobre el total del modelo. La suma de las 33 variables es **exactamente 100.0%**.
+- **`nivel_impacto`**: Categoría cualitativa lista para renderizar en badges o chips de la UI:
+  - $\ge 20\% \rightarrow$ **`Impacto Muy Alto`** (ej: Distrito, ~31%)
+  - $10\% - 19.9\% \rightarrow$ **`Impacto Alto`** (ej: NSE A, ~13%)
+  - $5\% - 9.9\% \rightarrow$ **`Impacto Moderado`** (ej: Superficie, Periodo, ~6-8%)
+  - $< 5\% \rightarrow$ **`Impacto Leve`** (ej: Antigüedad, Cocheras, Pisos, <5%)
 
-El `valor_base_constantes` es el precio de partida (media del modelo).
+### Estrategia recomendada para Backend y Frontend:
+
+```
+                  ┌──────────────────────────────────────────────┐
+                  │    POST /api/v1/prediccion/venta (o /alquiler)│
+                  └──────────────────────┬───────────────────────┘
+                                         │ Retorna 33 variables
+                                         ▼
+                  ┌──────────────────────────────────────────────┐
+                  │              Backend Principal               │
+                  │   - Guarda las 33 variables en PostgreSQL    │
+                  └──────────────────────┬───────────────────────┘
+                                         │
+                    ┌────────────────────┴────────────────────┐
+                    ▼                                         ▼
+┌───────────────────────────────────────┐ ┌───────────────────────────────────────┐
+│     Vista Inicial (Top 10 variables)  │ │ Botón "Mostrar todas las variables"   │
+│ - contribuciones.slice(0, 10)         │ │ - contribuciones.slice(10)            │
+│ - Explica el 83.5% del impacto        │ │ - Completa el 16.5% restante (100.0%) │
+│ - Barras de progreso limpias          │ │ - Despliegue en acordeón o modal      │
+└───────────────────────────────────────┘ └───────────────────────────────────────┘
+```
+
+1. **Almacenamiento (Backend):** El backend almacena el array `contribuciones` completo (las 33 variables) directamente en la base de datos (columna `JSONB` de valuaciones o tabla hija).
+2. **Vista Inicial (Top 10):** En la pantalla principal o tarjeta de resultados, el frontend muestra los primeros 10 elementos (`contribuciones.slice(0, 10)`), que representan aproximadamente el **83.5%** del impacto del precio.
+3. **Botón "Mostrar todas las variables":** Un botón interactivo permite al usuario desplegar las 23 variables secundarias (`contribuciones.slice(10)`), completando el **16.5%** restante hasta el 100.0%.
+
+El `valor_base_constantes` es el precio de partida (media global del modelo).
 La suma `valor_base + Σshap_values` ≈ `log1p(precio_constantes)`.
+
+---
+
+## Análisis de Sensibilidad de Factores (Pantalla Principal / Home)
+
+Para la tarjeta informativa o explicativa en la pantalla principal del frontend, el servicio expone:
+
+**`GET /api/v1/modelos/sensibilidad-factores?tipo_operacion=venta`** (o `alquiler`)
+
+**Response (200 OK):**
+```json
+{
+  "modelo": "xgboost_venta",
+  "tipo_operacion": "venta",
+  "version": "v2",
+  "metodo": "Análisis de Sensibilidad por Ganancia de Información (XGBoost Feature Attribution)",
+  "periodo_referencia": "2016-2023",
+  "factores_principales": [
+    {
+      "id": "ubicacion_entorno",
+      "factor": "Ubicación y Entorno Urbano",
+      "descripcion": "Distrito, estrato socioeconómico (NSE) y cercanía a vías principales, transporte, parques y servicios.",
+      "peso_porcentaje": 53.1,
+      "nivel_impacto": "Impacto Muy Alto",
+      "variables_incluidas": ["distrito_encoded", "pct_NSE_A", "distancia_centro_km", "dist_estacion_transporte_km", "..."]
+    },
+    {
+      "id": "superficie_espacio",
+      "factor": "Área y Superficie Construida",
+      "descripcion": "Metraje total en m², distribución espacial y número de ambientes (habitaciones y baños).",
+      "peso_porcentaje": 33.4,
+      "nivel_impacto": "Impacto Muy Alto",
+      "variables_incluidas": ["Superficie", "Habitaciones", "Banios", "ratio_banio_hab"]
+    },
+    {
+      "id": "estacionamiento_cocheras",
+      "factor": "Estacionamiento y Accesibilidad",
+      "descripcion": "Disponibilidad de cocheras y plazas de estacionamiento vehicular techado.",
+      "peso_porcentaje": 13.1,
+      "nivel_impacto": "Impacto Moderado",
+      "variables_incluidas": ["tiene_garaje", "Garajes"]
+    },
+    {
+      "id": "antiguedad_conservacion",
+      "factor": "Antigüedad y Conservación",
+      "descripcion": "Años de edificación del inmueble, depreciación física y condición de estreno.",
+      "peso_porcentaje": 0.4,
+      "nivel_impacto": "Impacto Leve",
+      "variables_incluidas": ["Antiguedad", "es_estreno"]
+    }
+  ],
+  "cobertura_macro_factores_pct": 100.0,
+  "nota": "Los porcentajes representan la sensibilidad promedio de mercado en Lima Metropolitana..."
+}
+```
 
 ---
 

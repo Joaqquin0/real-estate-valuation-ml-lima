@@ -43,8 +43,8 @@ def _obtener_rutas_configuracion() -> dict[str, list[Path]]:
             base_repo / "config" / "model_alquiler_config.json",
         ],
         "changelog": [
-            base_repo / "config" / "ipc_changelog.md",
             base_service / "config" / "ipc_changelog.md",
+            base_repo / "config" / "ipc_changelog.md",
         ],
     }
 
